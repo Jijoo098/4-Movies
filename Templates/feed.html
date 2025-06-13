@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="mb-4">Following Feed</h2>
+{% for post in posts %}
+    {% include 'partials/post_card.html' %}
+{% else %}
+    <p>You’re not following anyone or they haven't posted yet.</p>
+{% endfor %}
+{% endblock %}

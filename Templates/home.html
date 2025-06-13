@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Film Boxed - Home{% endblock %}
+
+{% block content %}
+<div class="container my-4">
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div>
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+            {{ message }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1>🎬 All Movie Reviews</h1>
+    <a href="{{ url_for('add_post') }}" class="btn btn-success">➕ Add New Review</a>
+  </div>
+
+  <form action="{{ url_for('search_movie') }}" method="get" class="mb-4">
+    <div class="input-group">
+      <input type="text" name="q" class="form-control" placeholder="Search movies or users" required>
+      <button type="submit" class="btn btn-primary">Search</button>
+    </div>
+  </form>
+
+  <div class="row">
+    {% for post in posts %}
+      <div class="col-md-6 col-lg-4 mb-4">
+        <div class="card h-100 shadow-sm">
+          {% if post.poster_url %}
+            <img src="{{ post.poster_url }}" class="card-img-top" alt="Poster for {{ post.movie }}" style="height: 300px; object-fit: cover;">
+          {% else %}
+            <img src="https://via.placeholder.com/300x450?text=No+Poster" class="card-img-top" alt="No poster available" style="height: 300px; object-fit: cover;">
+          {% endif %}
+
+          <div class="card-body d-flex flex-column">
+            <h5 class="card-title">{{ post.movie }} <span class="text-warning">⭐ {{ post.rating }}/10</span></h5>
+            <p class="card-text"><strong>{{ post.username }}</strong> says:</p>
+            <p class="card-text flex-grow-1">{{ post.content }}</p>
+            <p class="text-muted"><small>Posted on {{ post.created_at.strftime('%b %d, %Y at %I:%M %p') }}</small></p>
+
+
+            <!-- Like button -->
+            <form action="{{ url_for('like_post', post_id=post.id) }}" method="POST" class="mb-2">
+              <button type="submit" class="btn btn-outline-danger w-100">❤️ Like ({{ post.likes }})</button>
+            </form>
+
+            {% if session.get('user_id') == post.user_id %}
+               <div class="d-flex justify-content-between mb-3">
+               <a href="{{ url_for('edit_post', post_id=post.id) }}" class="btn btn-sm btn-outline-primary w-50 me-1">✏️ Edit</a>
+               <a href="{{ url_for('delete_post', post_id=post.id) }}" class="btn btn-sm btn-outline-danger w-50 ms-1" onclick="return confirm('Are you sure you want to delete this review?');">🗑️ Delete</a>
+             </div>
+            {% endif %}
+
+            <!-- Comments Section -->
+            <div class="comments mt-3">
+              <h6>💬 Comments ({{ post.comments | length }})</h6>
+
+              {% if post.comments %}
+                {% for comment in post.comments %}
+                  <div class="border rounded p-2 mb-2">
+                    <small><strong>{{ comment.username }}</strong> on {{ comment.created_at.strftime('%b %d, %Y at %I:%M %p') }}:<br>
+                   {{ comment.text }}</small>
+
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p class="text-muted">No comments yet.</p>
+              {% endif %}
+
+              <!-- Add Comment Form -->
+              {% if session.get('user_id') %}
+                <form action="{{ url_for('add_comment', post_id=post.id) }}" method="POST">
+
+
+                  <div class="input-group">
+                    <input type="text" name="comment" class="form-control" placeholder="Add a comment..." required>
+                    <button type="submit" class="btn btn-outline-secondary">Post</button>
+                  </div>
+                </form>
+              {% else %}
+                <p class="text-muted mt-2">Login to comment.</p>
+              {% endif %}
+            </div>
+
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- Pagination Controls -->
+<div class="d-flex justify-content-center mt-4">
+  <nav>
+    <ul class="pagination">
+      {% if posts.has_prev %}
+        <li class="page-item">
+          <a class="page-link" href="{{ url_for('home', page=posts.prev_num) }}">Previous</a>
+        </li>
+      {% else %}
+        <li class="page-item disabled">
+          <a class="page-link">Previous</a>
+        </li>
+      {% endif %}
+
+      <li class="page-item active">
+        <a class="page-link">{{ posts.page }}</a>
+      </li>
+
+      {% if posts.has_next %}
+        <li class="page-item">
+          <a class="page-link" href="{{ url_for('home', page=posts.next_num) }}">Next</a>
+        </li>
+      {% else %}
+        <li class="page-item disabled">
+          <a class="page-link">Next</a>
+        </li>
+      {% endif %}
+    </ul>
+  </nav>
+</div>
+
+{% endblock %}

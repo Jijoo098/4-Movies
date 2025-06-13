@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Edit Review{% endblock %}
+{% block content %}
+<div class="container my-5">
+  <h2>Edit Your Review</h2>
+  <form method="POST">
+    <div class="mb-3">
+      <label for="movie" class="form-label">Movie Title</label>
+      <input type="text" class="form-control" id="movie" name="movie" value="{{ post.movie }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="rating" class="form-label">Rating</label>
+      <input type="number" class="form-control" id="rating" name="rating" value="{{ post.rating }}" min="1" max="10" required>
+    </div>
+    <div class="mb-3">
+      <label for="content" class="form-label">Content</label>
+      <textarea class="form-control" id="content" name="content" rows="4" required>{{ post.content }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label for="poster_url" class="form-label">Poster URL</label>
+      <input type="url" class="form-control" id="poster_url" name="poster_url" value="{{ post.poster_url }}">
+    </div>
+    <button type="submit" class="btn btn-primary">Update Review</button>
+  </form>
+</div>
+{% endblock %}

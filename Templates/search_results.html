@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Search Results for "{{ query }}"</h2>
+
+{% if movies %}
+    {% for movie in movies %}
+        <div class="movie-box">
+            <div class="poster">
+                <img src="{{ movie.Poster }}" alt="{{ movie.Title }} poster" width="150">
+            </div>
+            <div class="details">
+                <h3>{{ movie.Title }} ({{ movie.Year }})</h3>
+                <p><strong>Genre:</strong> {{ movie.Genre }}</p>
+                <p><strong>Runtime:</strong> {{ movie.Runtime }}</p>
+                <p><strong>IMDb Rating:</strong> {{ movie.imdbRating }}</p>
+                <p><strong>Plot:</strong> {{ movie.Plot }}</p>
+                <form action="{{ url_for('add_to_watchlist') }}" method="POST">
+                    <input type="hidden" name="title" value="{{ movie.Title }}">
+                    <input type="hidden" name="poster_url" value="{{ movie.Poster }}">
+                    <button type="submit">➕ Add to Watchlist</button>
+                </form>
+            </div>
+        </div>
+        <hr>
+    {% endfor %}
+{% else %}
+    <p>No movies found for "{{ query }}".</p>
+{% endif %}
+
+{% endblock %}

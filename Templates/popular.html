@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <h2 class="mb-4">🔥 Popular Movies</h2>
+  <div class="row">
+    {% for movie in movies %}
+    <div class="col-md-4 mb-4">
+      <div class="card h-100 shadow-sm">
+        <img src="{{ movie.poster_url }}" class="card-img-top" alt="{{ movie.movie }}">
+        <div class="card-body">
+          <h5 class="card-title">{{ movie.movie }}</h5>
+          <p class="card-text">Average Rating: ⭐ {{ movie.avg_rating }}</p>
+          <p class="card-text">Reviews: {{ movie.review_count }}</p>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

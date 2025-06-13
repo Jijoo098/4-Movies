@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block content %}
+<link href="https://fonts.googleapis.com/css2?family=Inter&display=swap" rel="stylesheet">
+<style>
+    body {
+        font-family: 'Inter', sans-serif;
+        background-color: #181818;
+        color: #f5f5f5;
+    }
+
+    .sidebar {
+        background-color: #101010;
+    }
+
+    .sidebar .nav-link:hover {
+        background-color: #333;
+        border-radius: 5px;
+    }
+
+    .sidebar img {
+        border: 2px solid #555;
+    }
+
+    .card {
+        background-color: #222;
+        color: #fff;
+        border: none;
+    }
+
+    .card-header {
+        background-color: #111;
+        border-bottom: 1px solid #333;
+    }
+
+    .card-body img {
+        max-height: 200px;
+        border-radius: 5px;
+    }
+
+    .rating {
+        color: gold;
+        font-weight: bold;
+    }
+
+    .btn-outline-primary, .btn-outline-danger {
+        color: #fff;
+        border-color: #555;
+    }
+
+    .btn-outline-primary:hover {
+        background-color: #1f6feb;
+        border-color: #1f6feb;
+    }
+
+    .btn-outline-danger:hover {
+        background-color: #ff4f4f;
+        border-color: #ff4f4f;
+    }
+
+    .search-dropdown {
+        position: absolute;
+        background: #fff;
+        color: #000;
+        z-index: 1000;
+        width: 100%;
+        max-height: 250px;
+        overflow-y: auto;
+        border: 1px solid #ccc;
+        border-radius: 5px;
+    }
+
+    .search-result {
+        padding: 5px 10px;
+        border-bottom: 1px solid #eee;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+    }
+
+    .search-result img {
+        width: 40px;
+        margin-right: 10px;
+    }
+
+    .search-result:hover {
+        background-color: #f0f0f0;
+    }
+</style>
+
+<div class="container-fluid">
+    <div class="row">
+        <!-- Sidebar -->
+        <nav class="col-md-2 d-none d-md-block sidebar text-white">
+            <div class="sidebar-sticky pt-3 text-center">
+                <img src="{{ url_for('static', filename='profile_pics/' + current_user.profile_pic) if current_user.profile_pic else 'https://via.placeholder.com/80' }}"
+                     class="rounded-circle mb-2" width="80" height="80" alt="Profile" />
+                <h5>{{ current_user.username }}</h5>
+
+                <form action="{{ url_for('upload_profile_pic') }}" method="POST" enctype="multipart/form-data" class="mb-3 px-2">
+                    <input type="file" name="profile_pic" class="form-control form-control-sm mb-2" required>
+                    <button type="submit" class="btn btn-sm btn-primary btn-block">Upload</button>
+                </form>
+
+                <ul class="nav flex-column text-left px-3">
+                    <li class="nav-item"><a class="nav-link text-white" href="{{ url_for('home') }}">🏠 Popular</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="{{ url_for('search_movie') }}">🔍 Search</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="{{ url_for('user_profile', username=current_user.username) }}">👤 Profile</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="{{ url_for('diary') }}">📓 Diary</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="{{ url_for('lists') }}">📂 Lists</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="#">📺 Watchlist</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="#">📂 Lists</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="#">📓 Diary</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="#">📝 Reviews</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="#">📈 Activity</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="{{ url_for('settings') }}">⚙️ Settings</a></li>
+                    <li class="nav-item"><a class="nav-link text-white" href="{{ url_for('logout') }}">🚪 Sign Out</a></li>
+                </ul>
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main role="main" class="col-md-10 ml-sm-auto px-4">
+            <!-- 🔍 Search Bar -->
+            <div class="search-box my-3" style="position: relative;">
+                <input type="text" id="search-input" class="form-control" placeholder="Search movies..." autocomplete="off">
+                <div id="search-results" class="search-dropdown"></div>
+            </div>
+
+            <h2 class="mt-4">Your Reviews</h2>
+
+            {% for post in posts %}
+            <div class="card mb-4 p-3 d-flex flex-row">
+                {% if post.poster_url %}
+                    <img src="{{ post.poster_url }}" alt="Poster" class="img-thumbnail mr-3" style="width: 140px; height: auto;">
+                {% else %}
+                    <img src="https://via.placeholder.com/140x210?text=No+Poster" alt="No Poster" class="img-thumbnail mr-3">
+                {% endif %}
+                <div>
+                    <h5><strong>{{ post.movie }}</strong> <span class="rating">⭐ {{ post.rating }}/10</span></h5>
+                    <p>{{ post.content }}</p>
+                    <p class="text-muted">Posted on {{ post.created_at.strftime('%Y-%m-%d') }}</p>
+                    <a href="{{ url_for('edit_post', post_id=post.id) }}" class="btn btn-sm btn-outline-primary">Edit</a>
+                    <a href="{{ url_for('delete_post', post_id=post.id) }}" class="btn btn-sm btn-outline-danger">Delete</a>
+                </div>
+            </div>
+            {% endfor %}
+        </main>
+    </div>
+</div>
+
+<script>
+document.getElementById('search-input').addEventListener('input', function () {
+    const query = this.value;
+    if (query.length < 2) {
+        document.getElementById('search-results').innerHTML = '';
+        return;
+    }
+
+    fetch(`/search_preview?query=${query}`)
+        .then(response => response.json())
+        .then(data => {
+            let resultsHTML = '';
+            data.forEach(movie => {
+                resultsHTML += `
+                    <div class="search-result" onclick="window.location.href='/add_review/${encodeURIComponent(movie.Title)}'">
+                        <img src="${movie.Poster}" alt="${movie.Title}">
+                        <strong>${movie.Title}</strong> (${movie.Year})
+                    </div>`;
+            });
+            document.getElementById('search-results').innerHTML = resultsHTML;
+        });
+});
+</script>
+{% endblock %}

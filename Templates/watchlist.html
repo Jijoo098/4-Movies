@@ -1,0 +1,31 @@
+<!-- templates/watchlist.html -->
+{% extends 'base.html' %}
+
+{% block content %}
+  <h2>📺 Your Watchlist</h2>
+
+  {% if movies %}
+    <div class="row">
+      {% for movie in movies %}
+        <div class="col-md-3 mb-4">
+          <div class="card bg-dark text-white">
+            <img src="{{ movie.poster_url }}" class="card-img-top" alt="{{ movie.title }}">
+            <div class="card-body">
+              <h5 class="card-title">{{ movie.title }}</h5>
+              
+              <!-- Remove from Watchlist Button -->
+              <form method="POST" action="{{ url_for('remove_from_watchlist', movie_id=movie.id) }}">
+                <button class="btn btn-danger btn-sm" type="submit">Remove</button>
+              </form>
+
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p>You have no movies in your watchlist yet.</p>
+  {% endif %}
+
+{% endblock %}
+

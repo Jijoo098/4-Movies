@@ -1,0 +1,25 @@
+.movie-box {
+    display: flex;
+    margin-bottom: 20px;
+    background-color: #1e1e1e;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.poster img {
+    border-radius: 8px;
+}
+
+.details {
+    margin-left: 20px;
+    color: #fff;
+}
+
+button {
+    padding: 5px 10px;
+    background-color: #3b82f6;
+    border: none;
+    color: white;
+    border-radius: 4px;
+    cursor: pointer;
+}

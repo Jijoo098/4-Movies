@@ -1,0 +1,120 @@
+<!-- templates/base.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Filmboxed</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Bootstrap CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+  <style>
+    body {
+      background-color: #121212;
+      color: #ffffff;
+    }
+    .sidebar {
+      height: 100vh;
+      background-color: #1f1f1f;
+      padding-top: 1rem;
+    }
+    .sidebar a {
+      color: #ccc;
+      text-decoration: none;
+      display: block;
+      padding: 0.5rem 1rem;
+    }
+    .sidebar a:hover, .sidebar .nav-link.active {
+      color: #ffffff;
+      background-color: #333;
+    }
+    .content {
+      padding: 2rem;
+    }
+    .navbar {
+      background-color: #1f1f1f;
+    }
+    .navbar-brand {
+      font-weight: bold;
+      color: #fff;
+    }
+    .flash-message {
+      margin-top: 1rem;
+    }
+    @media (max-width: 768px) {
+      .sidebar {
+        position: absolute;
+        z-index: 1000;
+        width: 200px;
+        display: none;
+      }
+      .sidebar.show {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <nav class="navbar navbar-dark px-3">
+    <div class="container-fluid d-flex justify-content-between align-items-center">
+      {% if current_user.is_authenticated %}
+      <button class="btn btn-outline-light d-md-none" id="sidebarToggle">&#9776;</button>
+      {% endif %}
+      <a class="navbar-brand ms-2" href="{{ url_for('dashboard') }}">🎬 Filmboxed</a>
+
+      {% if current_user.is_authenticated %}
+      <div class="dropdown">
+        <a class="btn btn-secondary dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+          {{ current_user.username }}
+        </a>
+        <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+          <li><a class="dropdown-item" href="{{ url_for('edit_profile') }}">Edit Profile</a></li>
+          <li><a class="dropdown-item" href="{{ url_for('logout') }}">Logout</a></li>
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+  </nav>
+
+  <!-- Main Layout -->
+  <div class="container-fluid">
+    <div class="row">
+
+      {% if current_user.is_authenticated %}
+      <!-- Sidebar (visible on desktop) -->
+      <div class="col-md-2 sidebar d-none d-md-block" id="sidebar">
+        <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">🏠 Dashboard</a>
+        <a class="nav-link {% if request.endpoint == 'search_movie' %}active{% endif %}" href="{{ url_for('search_movie') }}">🔍 Search</a>
+        <a class="nav-link {% if request.endpoint == 'edit_profile' %}active{% endif %}" href="{{ url_for('edit_profile') }}">🖊️ Edit Profile</a>
+        <a class="nav-link" href="{{ url_for('logout') }}">🚪 Logout</a>
+      </div>
+      {% endif %}
+
+      <!-- Main Content Area -->
+      <div class="{% if current_user.is_authenticated %}col-md-10{% else %}col-12{% endif %} content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="alert alert-{{ category }} flash-message">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap & Sidebar Script -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script>
+    document.getElementById("sidebarToggle")?.addEventListener("click", function () {
+      const sidebar = document.getElementById("sidebar");
+      sidebar.classList.toggle("show");
+    });
+  </script>
+</body>
+</html>

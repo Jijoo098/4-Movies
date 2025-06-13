@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container mt-4 text-white">
+  <h2>📂 {{ movie_list.name }}</h2>
+  <p class="text-muted">{{ movie_list.description or "No description" }}</p>
+
+  <!-- 🔍 Add Movie Form -->
+  <div class="mt-4">
+    <h5>Add a Movie to This List</h5>
+    <form method="POST" action="{{ url_for('add_movie_to_list', list_id=movie_list.id) }}">
+      <div class="mb-3 position-relative">
+        <label for="movie-search" class="form-label">Search Movie</label>
+        <input type="text" name="title" id="movie-search" class="form-control" placeholder="Start typing...">
+        <div id="suggestions" class="list-group position-absolute w-100" style="z-index: 1000;"></div>
+      </div>
+      <input type="hidden" name="poster_url" id="poster-url">
+      <button type="submit" class="btn btn-primary">➕ Add Movie</button>
+    </form>
+  </div>
+
+  <hr>
+
+  <!-- 🎬 Movie Cards -->
+  <h4 class="mt-4">🎬 Movies in "{{ movie_list.name }}"</h4>
+  {% if movie_list.movies %}
+    <div class="row">
+      {% for movie in movie_list.movies %}
+        <div class="col-md-3 mb-4">
+          <div class="card shadow-sm bg-dark text-white h-100 border-0">
+            <img src="{{ movie.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" class="card-img-top" style="height: 350px; object-fit: cover;">
+            <div class="card-body d-flex flex-column">
+              <h6 class="card-title text-center">{{ movie.title }}</h6>
+            </div>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-muted">No movies in this list yet.</p>
+  {% endif %}
+</div>
+
+<!-- 🔧 Search Suggestion Script -->
+<script>
+document.getElementById('movie-search').addEventListener('input', function () {
+    const query = this.value;
+    const resultsBox = document.getElementById('suggestions');
+    if (query.length < 2) {
+        resultsBox.innerHTML = '';
+        return;
+    }
+
+    fetch(`/search_preview?query=${query}`)
+        .then(response => response.json())
+        .then(data => {
+            let html = '';
+            data.forEach(movie => {
+                html += `
+                    <button type="button" class="list-group-item list-group-item-action" onclick="selectMovie('${movie.Title}', '${movie.Poster}')">
+                        <img src="${movie.Poster}" style="height: 40px; margin-right: 10px;">
+                        ${movie.Title} (${movie.Year})
+                    </button>
+                `;
+            });
+            resultsBox.innerHTML = html;
+        });
+});
+
+function selectMovie(title, poster) {
+    document.getElementById('movie-search').value = title;
+    document.getElementById('poster-url').value = poster;
+    document.getElementById('suggestions').innerHTML = '';
+}
+</script>
+{% endblock %}

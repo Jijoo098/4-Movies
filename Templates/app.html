@@ -1,0 +1,1633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>
+  {% if view == "login" %}Login — Filmboxed
+  {% elif view == "signup" %}Sign Up — Filmboxed
+  {% elif view == "home" %}Filmboxed — Your life in film
+  {% elif view == "film" %}{{ movie.Title }} — Filmboxed
+  {% elif view == "log_film" %}Log {{ movie.Title }} — Filmboxed
+  {% elif view == "dashboard" %}Dashboard — Filmboxed
+  {% elif view == "search" %}Search — Filmboxed
+  {% elif view == "schedule" %}Schedule — Filmboxed
+  {% elif view == "profile" %}{{ user.username }} — Filmboxed
+  {% elif view == "edit_profile" %}Edit Profile — Filmboxed
+  {% elif view == "feed" %}Feed — Filmboxed
+  {% elif view == "diary" %}Diary — Filmboxed
+  {% elif view == "lists" %}Lists — Filmboxed
+  {% elif view == "view_list" %}{{ movie_list.name }} — Filmboxed
+  {% elif view == "create_list" %}Create List — Filmboxed
+  {% elif view == "edit_list" %}Edit List — Filmboxed
+  {% elif view == "settings" %}Settings — Filmboxed
+  {% elif view == "watchlist" %}Watchlist — Filmboxed
+  {% elif view == "popular" %}Popular — Filmboxed
+  {% elif view == "add_post" %}Add Review — Filmboxed
+  {% elif view == "add_review" %}Review {{ movie.Title }} — Filmboxed
+  {% elif view == "add_diary" %}Add Diary Entry — Filmboxed
+  {% elif view == "edit_post" %}Edit Review — Filmboxed
+  {% elif view == "edit_diary" %}Edit Diary Entry — Filmboxed
+  {% elif view == "bookmarks" %}Bookmarks — Filmboxed
+  {% elif view == "members" %}Members — Filmboxed
+  {% else %}Filmboxed{% endif %}
+  </title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body class="{% if view == 'login' or view == 'signup' %}is-auth{% endif %}">
+
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="brand" href="{% if current_user.is_authenticated %}{{ url_for('dashboard') }}{% else %}{{ url_for('home') }}{% endif %}">
+        FILM<span>BOXED</span>
+      </a>
+
+      {% if current_user.is_authenticated %}
+      <button class="nav-toggle" type="button" id="navToggle" aria-label="Toggle navigation">Menu</button>
+      <nav class="site-nav" id="siteNav">
+        <a class="{% if view in ['home', 'popular'] %}is-active{% endif %}" href="{{ url_for('home') }}">Films</a>
+        <a class="{% if view == 'schedule' %}is-active{% endif %}" href="{{ url_for('schedule') }}">Schedule</a>
+        <a class="{% if view == 'diary' %}is-active{% endif %}" href="{{ url_for('diary') }}">Diary</a>
+        <a class="{% if view == 'lists' %}is-active{% endif %}" href="{{ url_for('lists') }}">Lists</a>
+        <a class="{% if view == 'watchlist' %}is-active{% endif %}" href="{{ url_for('watchlist') }}">Watchlist</a>
+        <a class="{% if view == 'profile' %}is-active{% endif %}" href="{{ url_for('user_profile', username=current_user.username) }}">Profile</a>
+        <a class="{% if view == 'dashboard' %}is-active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
+        <a class="nav-search {% if view == 'search' %}is-active{% endif %}" href="{{ url_for('search_movie') }}" aria-label="Search" title="Search">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+        </a>
+      </nav>
+
+      <div class="header-end dropdown">
+        <a class="user-chip dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+          {{ current_user.username }}
+        </a>
+        <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+          <li><a class="dropdown-item" href="{{ url_for('edit_profile') }}">Edit Profile</a></li>
+          <li><a class="dropdown-item" href="{{ url_for('settings') }}">Settings</a></li>
+          <li><a class="dropdown-item" href="{{ url_for('logout') }}">Sign Out</a></li>
+        </ul>
+      </div>
+      {% else %}
+      <nav class="site-nav" style="display:flex;">
+        <a class="{% if view == 'login' %}is-active{% endif %}" href="{{ url_for('login') }}">Login</a>
+        <a class="{% if view == 'signup' %}is-active{% endif %}" href="{{ url_for('signup') }}">Sign Up</a>
+      </nav>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="{% if view == 'login' or view == 'signup' %}{% else %}page-shell{% endif %}">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack">
+          {% for category, message in messages %}
+            <div class="alert alert-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+{% if view == "login" %}
+<div class="auth-page">
+  <div class="auth-stage">
+    <h1 class="brand-hero">FILM<span>BOXED</span></h1>
+    <p class="tagline">Your private cinema lobby for reviews and rewatches.</p>
+
+    <div class="form-panel">
+      <form method="POST" action="{{ url_for('login') }}" autocomplete="on">
+        <div class="mb-3">
+          <label for="email" class="form-label">Email</label>
+          <input type="email" name="email" id="email" class="form-control" required placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="mb-3">
+          <label for="password" class="form-label">Password</label>
+          <input type="password" name="password" id="password" class="form-control" required placeholder="Your password" autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary">Enter the Lobby</button>
+      </form>
+      <p class="auth-switch">
+        New here? <a href="{{ url_for('signup') }}">Create an account</a>
+      </p>
+    </div>
+  </div>
+</div>
+
+{% elif view == "signup" %}
+<div class="auth-page">
+  <div class="auth-stage">
+    <h1 class="brand-hero">FILM<span>BOXED</span></h1>
+    <p class="tagline">Claim your seat. Rate, remember, and revisit.</p>
+
+    <div class="form-panel">
+      <form method="POST" action="{{ url_for('signup') }}" autocomplete="on">
+        <div class="mb-3">
+          <label for="username" class="form-label">Username</label>
+          <input type="text" class="form-control" id="username" name="username" required autocomplete="username" minlength="2" maxlength="40">
+        </div>
+        <div class="mb-3">
+          <label for="email" class="form-label">Email</label>
+          <input type="email" class="form-control" id="email" name="email" required autocomplete="email">
+        </div>
+        <div class="mb-3">
+          <label for="password" class="form-label">Password</label>
+          <input type="password" class="form-control" id="password" name="password" required autocomplete="new-password" minlength="6" placeholder="At least 6 characters">
+        </div>
+        <button type="submit" class="btn btn-primary">Join Filmboxed</button>
+      </form>
+      <p class="auth-switch">
+        Already a member? <a href="{{ url_for('login') }}">Sign in</a>
+      </p>
+    </div>
+  </div>
+</div>
+
+{% elif view == "home" %}
+<div class="page-head">
+  <div>
+    <h1>Now Showing</h1>
+    <p class="lede">Discover, rate, and remember — cinema lobby style.</p>
+  </div>
+  {% if current_user.is_authenticated %}
+  <a href="{{ url_for('search_movie') }}" class="btn btn-primary">Find a Film</a>
+  {% endif %}
+</div>
+
+<form action="{{ url_for('search_movie') }}" method="get" class="search-box mb-2">
+  <div class="input-group">
+    <input type="text" name="query" class="form-control" placeholder="Search films..." required>
+    <button type="submit" class="btn btn-secondary">Search</button>
+  </div>
+</form>
+
+{% if popular_movies %}
+<section class="band">
+  <div class="band-head">
+    <h2>Popular Films</h2>
+    <a href="{{ url_for('popular') }}">See all</a>
+  </div>
+  <div class="poster-rail">
+    {% for movie in popular_movies %}
+    <a class="poster-card" href="{% if movie.imdb_id %}{{ url_for('film_page', imdb_id=movie.imdb_id) }}{% else %}{{ url_for('film_by_title', title=movie.movie) }}{% endif %}">
+      <div class="poster-tile">
+        <img src="{{ movie.poster_url or 'https://via.placeholder.com/200x300?text=No+Poster' }}" alt="{{ movie.movie }}">
+      </div>
+      <h5>{{ movie.movie }}</h5>
+      <div class="meta">
+        <span class="stars-display" data-rating="{{ movie.avg_rating|round|int }}" style="--fill: {{ (movie.avg_rating / 10 * 100)|round }}%"></span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="band">
+  <div class="band-head">
+    <h2>Recent Reviews</h2>
+  </div>
+  <div class="review-stream">
+    {% for post in posts %}
+    <article class="review-row">
+      <a class="poster-tile" href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">
+        {% if post.poster_url %}
+          <img src="{{ post.poster_url }}" alt="Poster for {{ post.movie }}">
+        {% else %}
+          <img src="https://via.placeholder.com/200x300?text=No+Poster" alt="No poster">
+        {% endif %}
+      </a>
+      <div class="review-meta">
+        <h2 class="film-title">
+          <a href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">{{ post.movie }}</a>
+        </h2>
+        <div class="stars-display" data-rating="{{ post.rating }}" style="--fill: {{ (post.rating / 10 * 100)|round }}%"></div>
+        <p class="byline">
+          {% if post.author %}
+            <a href="{{ url_for('user_profile', username=post.author.username) }}">{{ post.author.username }}</a>
+          {% endif %}
+          · {{ post.created_at.strftime('%b %d, %Y') }}
+        </p>
+        <p class="body-text">{{ post.content }}</p>
+
+        {% if current_user.is_authenticated %}
+        <div class="review-actions">
+          <form action="{{ url_for('like_post', post_id=post.id) }}" method="POST">
+            <button type="submit" class="btn btn-sm btn-outline-primary">Like · {{ post.likes or 0 }}</button>
+          </form>
+          {% if current_user.id == post.user_id %}
+            <a href="{{ url_for('edit_post', post_id=post.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+            <a href="{{ url_for('delete_post', post_id=post.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this review?');">Delete</a>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-state">No reviews yet. Search a film and log your first watch.</div>
+    {% endfor %}
+  </div>
+
+  {% if posts.pages > 1 %}
+  <nav class="d-flex justify-content-center mt-4" aria-label="Pagination">
+    <ul class="pagination">
+      <li class="page-item {% if not posts.has_prev %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for('home', page=posts.prev_num) if posts.has_prev else '#' }}">Previous</a>
+      </li>
+      <li class="page-item active"><a class="page-link">{{ posts.page }}</a></li>
+      <li class="page-item {% if not posts.has_next %}disabled{% endif %}">
+        <a class="page-link" href="{{ url_for('home', page=posts.next_num) if posts.has_next else '#' }}">Next</a>
+      </li>
+    </ul>
+  </nav>
+  {% endif %}
+</section>
+
+{% if featured_lists %}
+<section class="band">
+  <div class="band-head">
+    <h2>Lists</h2>
+    {% if current_user.is_authenticated %}
+    <a href="{{ url_for('lists') }}">Your lists</a>
+    {% endif %}
+  </div>
+  {% for lst in featured_lists %}
+  <div class="list-row">
+    <div>
+      <h5>{{ lst.name }}</h5>
+      <p class="mb-0 text-muted">{{ lst.description or 'A curated shelf.' }}</p>
+    </div>
+    {% if current_user.is_authenticated and lst.user_id == current_user.id %}
+    <div class="actions">
+      <a href="{{ url_for('view_list', list_id=lst.id) }}" class="btn btn-sm btn-outline-secondary">View</a>
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% elif view == "film" %}
+{% if movie.Backdrop %}
+<div class="film-backdrop" style="background-image:url('{{ movie.Backdrop }}')"></div>
+{% endif %}
+<section class="film-hub">
+  <div class="film-hub__poster poster-tile">
+    <img src="{{ movie.Poster if movie.Poster != 'N/A' else 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.Title }}">
+  </div>
+  <div class="film-hub__meta">
+    <p class="eyebrow">Film</p>
+    <h1>{{ movie.Title }}</h1>
+    <p class="tagline-meta">
+      {{ movie.Year }}
+      {% if movie.Runtime and movie.Runtime != 'N/A' %} · {{ movie.Runtime }}{% endif %}
+      {% if movie.Genre and movie.Genre != 'N/A' %} · {{ movie.Genre }}{% endif %}
+      {% if movie.Director and movie.Director != 'N/A' %} · Dir. {{ movie.Director }}{% endif %}
+      {% if movie.imdbRating and movie.imdbRating != 'N/A' %} · TMDB {{ movie.imdbRating }}{% endif %}
+    </p>
+
+    {% if user_rating %}
+      <div class="mb-2">
+        <span class="stars-display" data-rating="{{ user_rating }}" style="--fill: {{ (user_rating / 10 * 100)|round }}%"></span>
+        <span class="text-muted ms-2" style="font-family:var(--font-ui);font-size:0.8rem;">Your rating</span>
+      </div>
+    {% endif %}
+
+    <p class="film-hub__plot">{{ movie.Plot }}</p>
+
+    {% if current_user.is_authenticated %}
+    <div class="action-strip">
+      <a class="btn btn-primary" href="{{ url_for('log_film', imdb_id=movie.imdbID) }}">Log</a>
+      <a class="btn btn-secondary" href="{{ url_for('add_review', movie_title=movie.Title) }}">Review</a>
+      <form action="{{ url_for('mark_watched', imdb_id=movie.imdbID) }}" method="POST">
+        <button type="submit" class="btn btn-{{ 'primary' if watched else 'secondary' }}">{{ 'Seen' if watched else 'Mark seen' }}</button>
+      </form>
+      <form action="{{ url_for('like_film', imdb_id=movie.imdbID) }}" method="POST">
+        <button type="submit" class="btn btn-{{ 'primary' if liked else 'secondary' }}">{{ 'Liked' if liked else 'Like' }}{% if like_count %} · {{ like_count }}{% endif %}</button>
+      </form>
+      {% if not in_watchlist %}
+      <form action="{{ url_for('add_to_watchlist') }}" method="POST">
+        <input type="hidden" name="title" value="{{ movie.Title }}">
+        <input type="hidden" name="poster_url" value="{{ movie.Poster }}">
+        <input type="hidden" name="imdb_id" value="{{ movie.imdbID }}">
+        <button type="submit" class="btn btn-secondary">Watchlist</button>
+      </form>
+      {% else %}
+        <a class="btn btn-outline-secondary" href="{{ url_for('watchlist') }}">On Watchlist</a>
+      {% endif %}
+      <button type="button" class="btn btn-secondary" id="watch-ott-toggle" aria-expanded="false" aria-controls="watch-ott-panel">Watch</button>
+      {% if movie.Trailer %}
+        <a class="btn btn-outline-secondary" href="{{ movie.Trailer }}" target="_blank" rel="noopener">Trailer</a>
+      {% endif %}
+    </div>
+
+    <form class="rate-review form-panel" action="{{ url_for('rate_film', imdb_id=movie.imdbID) }}" method="POST">
+      <div class="rate-review__stars">
+        <label class="form-label mb-0">Your rating</label>
+        <div class="star-rating" data-name="rating" data-value="{{ user_rating or 0 }}"></div>
+      </div>
+      <div class="rate-review__text">
+        <label for="film-review-text" class="form-label">Your thoughts</label>
+        <textarea
+          class="form-control"
+          id="film-review-text"
+          name="content"
+          rows="4"
+          placeholder="What did you think? Share a few words about the film..."
+        >{{ user_review or '' }}</textarea>
+      </div>
+      <button type="submit" class="btn btn-primary">Save to diary</button>
+      <p class="rate-review__hint text-muted">Rating or writing about a film is saved to your diary automatically.</p>
+    </form>
+
+    {% if user_lists %}
+    <form class="form-panel mt-3" action="{{ url_for('add_film_to_user_list', imdb_id=movie.imdbID) }}" method="POST">
+      <label class="form-label">Add to list</label>
+      <div class="d-flex gap-2 flex-wrap">
+        <select name="list_id" class="form-control" style="max-width:240px;" required>
+          {% for lst in user_lists %}
+          <option value="{{ lst.id }}">{{ lst.name }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-secondary">Add</button>
+      </div>
+    </form>
+    {% endif %}
+    {% else %}
+    <div class="action-strip">
+      <a class="btn btn-primary" href="{{ url_for('login') }}">Sign in to log & rate</a>
+      <button type="button" class="btn btn-secondary" id="watch-ott-toggle" aria-expanded="false" aria-controls="watch-ott-panel">Watch</button>
+      {% if movie.Trailer %}
+        <a class="btn btn-outline-secondary" href="{{ movie.Trailer }}" target="_blank" rel="noopener">Trailer</a>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="watch-ott-panel" id="watch-ott-panel" hidden>
+      <div class="watch-ott-panel__head">
+        <h3>Where to watch</h3>
+        {% if movie.ReleaseLabel or movie.Year %}
+        <p class="watch-ott-panel__release">Released {{ movie.ReleaseLabel or movie.Year }}</p>
+        {% endif %}
+      </div>
+
+      {% set wp = watch_providers %}
+      {% if wp and (wp.stream or wp.rent or wp.buy) %}
+        {% if wp.region %}
+        <p class="watch-ott-panel__region text-muted">Availability in {{ wp.region }}</p>
+        {% endif %}
+
+        {% if wp.stream %}
+        <div class="watch-ott-group">
+          <h4>Stream</h4>
+          <ul class="watch-ott-list">
+            {% for p in wp.stream %}
+            <li>
+              {% if p.logo %}<img src="{{ p.logo }}" alt="" width="36" height="36">{% endif %}
+              <span>{{ p.name }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if wp.rent %}
+        <div class="watch-ott-group">
+          <h4>Rent</h4>
+          <ul class="watch-ott-list">
+            {% for p in wp.rent %}
+            <li>
+              {% if p.logo %}<img src="{{ p.logo }}" alt="" width="36" height="36">{% endif %}
+              <span>{{ p.name }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if wp.buy %}
+        <div class="watch-ott-group">
+          <h4>Buy</h4>
+          <ul class="watch-ott-list">
+            {% for p in wp.buy %}
+            <li>
+              {% if p.logo %}<img src="{{ p.logo }}" alt="" width="36" height="36">{% endif %}
+              <span>{{ p.name }}</span>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if wp.link %}
+        <p class="watch-ott-panel__link">
+          <a href="{{ wp.link }}" target="_blank" rel="noopener">See all options</a>
+        </p>
+        {% endif %}
+        <p class="watch-ott-panel__credit text-muted">Streaming data from JustWatch</p>
+      {% else %}
+        <p class="watch-ott-panel__empty">No streaming info found for this region yet.</p>
+        {% if movie.ReleaseLabel or movie.Year %}
+        <p class="watch-ott-panel__release">
+          Theatrical release:
+          {% if movie.ReleaseLabel %}{{ movie.ReleaseLabel }}{% else %}{{ movie.Year }}{% endif %}
+        </p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<script>
+(function () {
+  var toggle = document.getElementById('watch-ott-toggle');
+  var panel = document.getElementById('watch-ott-panel');
+  if (!toggle || !panel) return;
+  toggle.addEventListener('click', function () {
+    var open = panel.hasAttribute('hidden');
+    if (open) {
+      panel.removeAttribute('hidden');
+      toggle.setAttribute('aria-expanded', 'true');
+      toggle.classList.add('btn-primary');
+      toggle.classList.remove('btn-secondary');
+    } else {
+      panel.setAttribute('hidden', '');
+      toggle.setAttribute('aria-expanded', 'false');
+      toggle.classList.remove('btn-primary');
+      toggle.classList.add('btn-secondary');
+    }
+  });
+})();
+</script>
+
+{% if histogram and reviews %}
+<section class="band">
+  <div class="band-head"><h2>Ratings</h2></div>
+  <div class="rating-bars">
+    {% for bucket in histogram|reverse %}
+    <div class="rating-bar-row">
+      <span class="rating-bar-label">{{ bucket.stars }}★</span>
+      <div class="rating-bar-track"><div class="rating-bar-fill" style="width:{{ bucket.pct }}%"></div></div>
+      <span class="rating-bar-count">{{ bucket.count }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if movie.Cast %}
+<section class="band">
+  <div class="band-head"><h2>Cast</h2></div>
+  <div class="cast-rail">
+    {% for person in movie.Cast %}
+    <div class="cast-card">
+      {% if person.photo %}
+        <img src="{{ person.photo }}" alt="{{ person.name }}">
+      {% else %}
+        <div class="cast-placeholder"></div>
+      {% endif %}
+      <strong>{{ person.name }}</strong>
+      <span>{{ person.character }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if movie.Crew %}
+<section class="band">
+  <div class="band-head"><h2>Crew</h2></div>
+  <div class="cast-rail">
+    {% for person in movie.Crew %}
+    <div class="cast-card">
+      {% if person.photo %}
+        <img src="{{ person.photo }}" alt="{{ person.name }}">
+      {% else %}
+        <div class="cast-placeholder"></div>
+      {% endif %}
+      <strong>{{ person.name }}</strong>
+      <span>{{ person.job }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if movie.Similar %}
+<section class="band">
+  <div class="band-head"><h2>Similar Films</h2></div>
+  <div class="poster-rail">
+    {% for sim in movie.Similar %}
+    <a class="poster-card" href="{{ url_for('film_page', imdb_id=sim.imdbID) }}">
+      <div class="poster-tile">
+        <img src="{{ sim.Poster }}" alt="{{ sim.Title }}">
+      </div>
+      <h5>{{ sim.Title }}</h5>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="band">
+  <div class="band-head">
+    <h2>Reviews</h2>
+  </div>
+  <div class="review-stream">
+    {% for post in reviews %}
+    <article class="review-row">
+      <div class="poster-tile">
+        <img src="{{ post.poster_url or 'https://via.placeholder.com/200x300?text=No+Poster' }}" alt="">
+      </div>
+      <div class="review-meta">
+        <div class="stars-display" data-rating="{{ post.rating }}" style="--fill: {{ (post.rating / 10 * 100)|round }}%"></div>
+        <p class="byline">
+          {% if post.author %}
+            <a href="{{ url_for('user_profile', username=post.author.username) }}">{{ post.author.username }}</a>
+          {% endif %}
+          · {{ post.created_at.strftime('%b %d, %Y') }}
+        </p>
+        {% if post.content and not post.content.startswith('Rated ') %}
+        <p class="body-text">{{ post.content }}</p>
+        {% endif %}
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-state">No reviews yet. Be the first to write one.</div>
+    {% endfor %}
+  </div>
+</section>
+
+{% elif view == "log_film" %}
+<div class="page-head">
+  <div>
+    <h1>Log a Film</h1>
+    <p class="lede">{{ movie.Title }}{% if movie.Year %} · {{ movie.Year }}{% endif %}</p>
+  </div>
+  <a href="{{ url_for('film_page', imdb_id=movie.imdbID) }}" class="btn btn-secondary">Back to Film</a>
+</div>
+
+<div class="review-with-poster">
+  <div class="poster-tile">
+    <img src="{{ movie.Poster if movie.Poster != 'N/A' else 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.Title }}">
+  </div>
+  <div class="form-panel">
+    <form method="POST">
+      <div class="mb-3">
+        <label for="watched_date" class="form-label">Watched on</label>
+        <input type="date" class="form-control" id="watched_date" name="watched_date" value="{{ today }}" required>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Rating</label>
+        <div class="star-rating" data-name="rating" data-value="0"></div>
+      </div>
+
+      <div class="mb-3 form-check">
+        <input class="form-check-input" type="checkbox" value="1" id="is_rewatch" name="is_rewatch">
+        <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-ui);color:var(--cream-muted);">
+          This was a rewatch
+        </label>
+      </div>
+
+      <div class="mb-3">
+        <label for="review" class="form-label">Review (optional)</label>
+        <textarea class="form-control" id="review" name="review" rows="4" placeholder="Add a short review to publish it with this log..."></textarea>
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save Log</button>
+    </form>
+  </div>
+</div>
+
+{% elif view == "dashboard" %}
+<div class="page-head">
+  <div>
+    <h1>Your Screen</h1>
+    <p class="lede">Search the catalog, then revisit your own reviews.</p>
+  </div>
+  <a href="{{ url_for('add_post') }}" class="btn btn-primary">Add Review</a>
+</div>
+
+<div class="search-box">
+  <input type="text" id="search-input" class="form-control" placeholder="Search movies..." autocomplete="off">
+  <div id="search-results" class="search-dropdown"></div>
+</div>
+
+<h2 class="mt-4 mb-3">Your Reviews</h2>
+
+<div class="review-stream">
+  {% for post in posts %}
+  <article class="review-row">
+    <a class="poster-tile" href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">
+      {% if post.poster_url %}
+        <img src="{{ post.poster_url }}" alt="Poster for {{ post.movie }}">
+      {% else %}
+        <img src="https://via.placeholder.com/200x300?text=No+Poster" alt="No poster">
+      {% endif %}
+    </a>
+    <div class="review-meta">
+      <h3 class="film-title">
+        <a href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">{{ post.movie }}</a>
+      </h3>
+      <div class="stars-display" data-rating="{{ post.rating }}" style="--fill: {{ (post.rating / 10 * 100)|round }}%"></div>
+      <p class="byline">{{ post.created_at.strftime('%Y-%m-%d') }}</p>
+      <p class="body-text">{{ post.content }}</p>
+      <div class="review-actions">
+        <a href="{{ url_for('edit_post', post_id=post.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+        <a href="{{ url_for('delete_post', post_id=post.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this review?');">Delete</a>
+      </div>
+    </div>
+  </article>
+  {% else %}
+  <div class="empty-state">You haven’t written any reviews yet.</div>
+  {% endfor %}
+</div>
+
+{% elif view == "search" %}
+<div class="page-head">
+  <div>
+    <h1>Search</h1>
+    <p class="lede">{% if query %}Results for “{{ query }}”{% else %}Find a title to log, rate, or save.{% endif %}</p>
+  </div>
+</div>
+
+<form action="{{ url_for('search_movie') }}" method="get" class="search-box mb-4">
+  <div class="input-group">
+    <input type="text" name="query" class="form-control" value="{{ query or '' }}" placeholder="Search movies..." required>
+    <button type="submit" class="btn btn-primary">Search</button>
+  </div>
+</form>
+
+{% if query %}
+  {% if movies %}
+    {% for movie in movies %}
+      <div class="movie-box">
+        <a class="poster" href="{{ url_for('film_page', imdb_id=movie.imdbID) }}">
+          <img src="{{ movie.Poster if movie.Poster != 'N/A' else 'https://via.placeholder.com/150x225?text=No+Poster' }}" alt="{{ movie.Title }} poster">
+        </a>
+        <div class="details">
+          <h3><a href="{{ url_for('film_page', imdb_id=movie.imdbID) }}">{{ movie.Title }} ({{ movie.Year }})</a></h3>
+          <p><strong>Genre:</strong> {{ movie.Genre }}</p>
+          <p><strong>Runtime:</strong> {{ movie.Runtime }}</p>
+          <p><strong>TMDB:</strong> {{ movie.imdbRating }}</p>
+          <p>{{ movie.Plot }}</p>
+          {% if current_user.is_authenticated %}
+          <div class="review-actions">
+            <a href="{{ url_for('film_page', imdb_id=movie.imdbID) }}" class="btn btn-sm btn-primary">Open Film</a>
+            <a href="{{ url_for('log_film', imdb_id=movie.imdbID) }}" class="btn btn-sm btn-secondary">Log</a>
+            <form action="{{ url_for('add_to_watchlist') }}" method="POST">
+              <input type="hidden" name="title" value="{{ movie.Title }}">
+              <input type="hidden" name="poster_url" value="{{ movie.Poster }}">
+              <input type="hidden" name="imdb_id" value="{{ movie.imdbID }}">
+              <button type="submit" class="btn btn-sm btn-outline-secondary">Watchlist</button>
+            </form>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">No movies found for “{{ query }}”.</div>
+  {% endif %}
+{% endif %}
+
+{% elif view == "schedule" %}
+<div class="page-head">
+  <div>
+    <h1>Schedule</h1>
+    <p class="lede">Worldwide theatrical openings and digital / OTT releases. Updated {{ as_of.strftime('%b %d, %Y') }}.</p>
+  </div>
+  <div class="schedule-jump">
+    <a href="#upcoming-theatrical">Theaters</a>
+    <a href="#now-playing">Now playing</a>
+    <a href="#ott-upcoming">Coming to OTT</a>
+    <a href="#ott-recent">New on OTT</a>
+  </div>
+</div>
+
+<section class="band" id="upcoming-theatrical">
+  <div class="band-head">
+    <h2>Upcoming theatrical</h2>
+    <span class="text-muted" style="font-family:var(--font-ui);font-size:0.78rem;">US · IN · GB · JP · FR · more</span>
+  </div>
+  {% if upcoming %}
+  <div class="schedule-grid">
+    {% for film in upcoming %}
+    <a class="schedule-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
+      <div class="poster-tile">
+        <img src="{{ film.poster }}" alt="{{ film.title }}">
+      </div>
+      <div class="schedule-card__body">
+        <span class="schedule-badge schedule-badge--theater">Theatrical</span>
+        <h3>{{ film.title }}</h3>
+        <p class="schedule-card__date">{{ film.release_label }}</p>
+        {% if film.regions %}
+        <p class="schedule-card__regions">{{ film.regions|join(' · ') }}</p>
+        {% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No upcoming theatrical releases found.</div>
+  {% endif %}
+</section>
+
+<section class="band" id="now-playing">
+  <div class="band-head">
+    <h2>Now in theaters</h2>
+  </div>
+  {% if now_playing %}
+  <div class="schedule-grid">
+    {% for film in now_playing %}
+    <a class="schedule-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
+      <div class="poster-tile">
+        <img src="{{ film.poster }}" alt="{{ film.title }}">
+      </div>
+      <div class="schedule-card__body">
+        <span class="schedule-badge schedule-badge--theater">In theaters</span>
+        <h3>{{ film.title }}</h3>
+        <p class="schedule-card__date">{% if film.release_label != 'TBA' %}Opened {{ film.release_label }}{% else %}Now screening{% endif %}</p>
+        {% if film.regions %}
+        <p class="schedule-card__regions">{{ film.regions|join(' · ') }}</p>
+        {% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No current theatrical titles found.</div>
+  {% endif %}
+</section>
+
+<section class="band" id="ott-upcoming">
+  <div class="band-head">
+    <h2>Coming to streaming / OTT</h2>
+    <span class="text-muted" style="font-family:var(--font-ui);font-size:0.78rem;">Digital release window</span>
+  </div>
+  {% if ott_upcoming %}
+  <div class="schedule-grid">
+    {% for film in ott_upcoming %}
+    <a class="schedule-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
+      <div class="poster-tile">
+        <img src="{{ film.poster }}" alt="{{ film.title }}">
+      </div>
+      <div class="schedule-card__body">
+        <span class="schedule-badge schedule-badge--ott">OTT / Digital</span>
+        <h3>{{ film.title }}</h3>
+        <p class="schedule-card__date">{{ film.release_label }}</p>
+        <p class="schedule-card__hint">Open the film page → Watch for platforms</p>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No upcoming digital releases found.</div>
+  {% endif %}
+</section>
+
+<section class="band" id="ott-recent">
+  <div class="band-head">
+    <h2>Recently arrived on OTT</h2>
+  </div>
+  {% if ott_recent %}
+  <div class="schedule-grid">
+    {% for film in ott_recent %}
+    <a class="schedule-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
+      <div class="poster-tile">
+        <img src="{{ film.poster }}" alt="{{ film.title }}">
+      </div>
+      <div class="schedule-card__body">
+        <span class="schedule-badge schedule-badge--ott">New on digital</span>
+        <h3>{{ film.title }}</h3>
+        <p class="schedule-card__date">{{ film.release_label }}</p>
+        <p class="schedule-card__hint">Open the film page → Watch for platforms</p>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No recent digital arrivals found.</div>
+  {% endif %}
+</section>
+
+{% elif view == "profile" %}
+<div class="profile-banner">
+  {% if user.profile_pic %}
+    <img class="profile-avatar" src="{{ url_for('static', filename='profile_pics/' + user.profile_pic) }}" alt="{{ user.username }}">
+  {% else %}
+    <img class="profile-avatar" src="https://via.placeholder.com/88" alt="{{ user.username }}">
+  {% endif %}
+  <div>
+    <h1>{{ user.username }}</h1>
+    {% if user.bio %}
+      <p class="lede" style="border:none;padding:0;margin:0.35rem 0 0;">{{ user.bio }}</p>
+    {% endif %}
+    <p class="profile-stats">
+      {{ posts|length }} reviews · {{ watched_films|length }} watched · {{ liked_films|length }} likes · {{ diary_entries|length }} diary
+    </p>
+    {% if current_user.is_authenticated and current_user.username != user.username %}
+      <form action="{{ url_for('unfollow_user' if is_following else 'follow_user', username=user.username) }}" method="POST" class="mt-3">
+        <button type="submit" class="btn btn-{{ 'secondary' if is_following else 'primary' }}">
+          {{ 'Unfollow' if is_following else 'Follow' }}
+        </button>
+      </form>
+    {% elif current_user.is_authenticated and current_user.username == user.username %}
+      <a href="{{ url_for('edit_profile') }}" class="btn btn-secondary mt-3">Edit Profile</a>
+    {% endif %}
+  </div>
+</div>
+
+<section class="band" style="margin-top:0;">
+  <div class="band-head">
+    <h2>Favorite Films</h2>
+  </div>
+  {% if favorites %}
+  <div class="favorites-hero">
+    {% for fav in favorites %}
+      <a href="{% if fav.imdb_id %}{{ url_for('film_page', imdb_id=fav.imdb_id) }}{% else %}{{ url_for('film_by_title', title=fav.title) }}{% endif %}">
+        <div class="poster-tile">
+          <img src="{{ fav.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ fav.title }}">
+        </div>
+      </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state favorites-empty">No favorites yet.{% if current_user.is_authenticated and current_user.id == user.id %} <a href="{{ url_for('edit_profile') }}">Pick four</a>.{% endif %}</div>
+  {% endif %}
+</section>
+
+<nav class="profile-tabs">
+  <a class="{% if tab == 'reviews' %}is-active{% endif %}" href="{{ url_for('user_profile', username=user.username, tab='reviews') }}">Reviews</a>
+  <a class="{% if tab == 'films' %}is-active{% endif %}" href="{{ url_for('user_profile', username=user.username, tab='films') }}">Films</a>
+  <a class="{% if tab == 'likes' %}is-active{% endif %}" href="{{ url_for('user_profile', username=user.username, tab='likes') }}">Likes</a>
+  <a class="{% if tab == 'diary' %}is-active{% endif %}" href="{{ url_for('user_profile', username=user.username, tab='diary') }}">Diary</a>
+</nav>
+
+{% if tab == 'films' %}
+  {% if watched_films %}
+  <div class="poster-grid mt-3">
+    {% for film in watched_films %}
+    <a class="poster-card" href="{{ url_for('film_page', imdb_id=film.tmdb_id) }}">
+      <div class="poster-tile"><img src="{{ film.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ film.title }}"></div>
+      <h5>{{ film.title }}</h5>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No watched films yet.</div>
+  {% endif %}
+{% elif tab == 'likes' %}
+  {% if liked_films %}
+  <div class="poster-grid mt-3">
+    {% for film in liked_films %}
+    <a class="poster-card" href="{{ url_for('film_page', imdb_id=film.tmdb_id) }}">
+      <div class="poster-tile"><img src="{{ film.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ film.title }}"></div>
+      <h5>{{ film.title }}</h5>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No liked films yet.</div>
+  {% endif %}
+{% elif tab == 'diary' %}
+  {% if diary_entries %}
+  <div class="poster-grid mt-3">
+    {% for entry in diary_entries %}
+    <div class="poster-card">
+      <a class="poster-tile" href="{% if entry.imdb_id %}{{ url_for('film_page', imdb_id=entry.imdb_id) }}{% else %}{{ url_for('film_by_title', title=entry.title) }}{% endif %}">
+        <img src="{{ entry.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ entry.title }}">
+      </a>
+      <h5>{{ entry.title }}</h5>
+      {% if entry.rating %}<div class="meta"><span class="stars-display" data-rating="{{ entry.rating }}" style="--fill: {{ (entry.rating / 10 * 100)|round }}%"></span></div>{% endif %}
+      <p class="byline">{{ entry.watched_date.strftime('%b %d, %Y') }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No diary entries yet.</div>
+  {% endif %}
+{% else %}
+  <div class="review-stream mt-3">
+    {% for post in posts %}
+    <article class="review-row">
+      <a class="poster-tile" href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">
+        {% if post.poster_url %}
+          <img src="{{ post.poster_url }}" alt="{{ post.movie }}">
+        {% else %}
+          <img src="https://via.placeholder.com/200x300?text=No+Poster" alt="No poster">
+        {% endif %}
+      </a>
+      <div class="review-meta">
+        <h3 class="film-title">
+          <a href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">{{ post.movie }}</a>
+        </h3>
+        <div class="stars-display" data-rating="{{ post.rating }}" style="--fill: {{ (post.rating / 10 * 100)|round }}%"></div>
+        <p class="byline">{{ post.created_at.strftime('%Y-%m-%d') }}</p>
+        <p class="body-text">{{ post.content }}</p>
+      </div>
+    </article>
+    {% else %}
+    <div class="empty-state">No reviews from this member yet.</div>
+    {% endfor %}
+  </div>
+{% endif %}
+
+{% elif view == "members" %}
+<div class="page-head">
+  <div>
+    <h1>Members</h1>
+    <p class="lede">Find voices to follow in the lobby.</p>
+  </div>
+</div>
+{% if members %}
+  {% for card in members %}
+  <div class="member-row">
+    <div class="member-row__identity">
+      {% if card.user.profile_pic %}
+        <img class="profile-avatar" src="{{ url_for('static', filename='profile_pics/' + card.user.profile_pic) }}" alt="" width="56" height="56">
+      {% else %}
+        <img class="profile-avatar" src="https://via.placeholder.com/56" alt="" width="56" height="56">
+      {% endif %}
+      <div>
+        <h3 class="film-title" style="margin:0;"><a href="{{ url_for('user_profile', username=card.user.username) }}">{{ card.user.username }}</a></h3>
+        <p class="byline mb-0">{{ card.review_count }} reviews · {{ card.diary_count }} diary · {{ card.follower_count }} followers</p>
+      </div>
+    </div>
+    {% if card.favorites %}
+    <div class="member-row__favs">
+      {% for fav in card.favorites %}
+        <a href="{% if fav.imdb_id %}{{ url_for('film_page', imdb_id=fav.imdb_id) }}{% else %}{{ url_for('film_by_title', title=fav.title) }}{% endif %}">
+          <img src="{{ fav.poster_url or 'https://via.placeholder.com/40x60' }}" alt="{{ fav.title }}">
+        </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="empty-state">No members yet.</div>
+{% endif %}
+
+{% elif view == "edit_profile" %}
+<div class="page-head">
+  <div>
+    <h1>Edit Profile</h1>
+    <p class="lede">How you appear in the lobby — including your four favorites.</p>
+  </div>
+</div>
+
+<div class="form-panel form-panel--narrow">
+  <form method="POST" enctype="multipart/form-data">
+    <div class="mb-3">
+      <label for="username" class="form-label">Username</label>
+      <input type="text" name="username" id="username" class="form-control" value="{{ current_user.username }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="bio" class="form-label">Bio</label>
+      <textarea name="bio" id="bio" class="form-control" rows="3">{{ current_user.bio }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label for="profile_pic" class="form-label">Profile Picture</label>
+      <input type="file" name="profile_pic" id="profile_pic" class="form-control">
+      {% if current_user.profile_pic %}
+        <div class="mt-3">
+          <img src="{{ url_for('static', filename='profile_pics/' ~ current_user.profile_pic) }}" width="100" class="profile-avatar" alt="Current profile">
+        </div>
+      {% endif %}
+    </div>
+
+    <hr>
+    <h3 style="font-size:1.25rem;margin-bottom:1rem;">Favorite Films</h3>
+    <p class="text-muted mb-3" style="font-size:0.9rem;">Search and pin up to four posters for your profile hero.</p>
+
+    <div class="fav-picker">
+      {% for pos in range(1, 5) %}
+      {% set fav = fav_map.get(pos) %}
+      <div class="fav-slot" data-fav-slot="{{ pos }}">
+        <label class="form-label">Favorite {{ pos }}</label>
+        <input type="text" class="form-control fav-search" placeholder="Search a film..." autocomplete="off" data-pos="{{ pos }}">
+        <div class="search-dropdown fav-results" id="fav-results-{{ pos }}"></div>
+        <input type="hidden" name="fav_title_{{ pos }}" id="fav_title_{{ pos }}" value="{{ fav.title if fav else '' }}">
+        <input type="hidden" name="fav_poster_{{ pos }}" id="fav_poster_{{ pos }}" value="{{ fav.poster_url if fav else '' }}">
+        <input type="hidden" name="fav_imdb_{{ pos }}" id="fav_imdb_{{ pos }}" value="{{ fav.imdb_id if fav else '' }}">
+        <div class="fav-slot__preview" id="fav-preview-{{ pos }}" {% if not fav %}style="display:none"{% endif %}>
+          <img id="fav-img-{{ pos }}" src="{{ fav.poster_url if fav else '' }}" alt="">
+          <div>
+            <strong id="fav-label-{{ pos }}">{{ fav.title if fav else '' }}</strong>
+            <button type="button" class="btn btn-sm btn-outline-danger mt-2 fav-clear" data-pos="{{ pos }}">Clear</button>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <button type="submit" class="btn btn-primary mt-4">Save Changes</button>
+  </form>
+</div>
+
+{% elif view == "feed" %}
+<div class="page-head">
+  <div>
+    <h1>Activity</h1>
+    <p class="lede">What people you follow have been watching.</p>
+  </div>
+</div>
+
+{% if activity %}
+  {% for item in activity %}
+  <article class="activity-row">
+    <a class="poster-tile" href="{% if item.imdb_id %}{{ url_for('film_page', imdb_id=item.imdb_id) }}{% else %}{{ url_for('film_by_title', title=item.title) }}{% endif %}">
+      <img src="{{ item.poster_url or 'https://via.placeholder.com/100x150?text=?' }}" alt="">
+    </a>
+    <div>
+      <p class="verb">
+        <a href="{{ url_for('user_profile', username=item.user.username) }}">{{ item.user.username }}</a>
+        {% if item.kind == 'log' %}
+          logged{% if item.is_rewatch %} a rewatch of{% endif %}
+        {% else %}
+          reviewed
+        {% endif %}
+      </p>
+      <h3 class="film-title">
+        <a href="{% if item.imdb_id %}{{ url_for('film_page', imdb_id=item.imdb_id) }}{% else %}{{ url_for('film_by_title', title=item.title) }}{% endif %}">{{ item.title }}</a>
+      </h3>
+      {% if item.rating %}
+        <div class="stars-display" data-rating="{{ item.rating }}" style="--fill: {{ (item.rating / 10 * 100)|round }}%"></div>
+      {% endif %}
+      {% if item.text %}
+        <p class="body-text mt-2">{{ item.text }}</p>
+      {% endif %}
+      <p class="byline">{{ item.when.strftime('%b %d, %Y') if item.when else '' }}</p>
+    </div>
+  </article>
+  {% endfor %}
+{% else %}
+  <div class="empty-state">Follow members to fill this lobby with activity.</div>
+{% endif %}
+
+{% elif view == "diary" %}
+<div class="page-head">
+  <div>
+    <h1>Diary</h1>
+    <p class="lede">A private log of nights at the movies.</p>
+  </div>
+  <a href="{{ url_for('add_diary') }}" class="btn btn-primary">Add Entry</a>
+</div>
+
+{% if entries %}
+<div class="poster-grid">
+  {% for entry in entries %}
+  <div class="poster-card">
+    <a class="poster-tile" href="{% if entry.imdb_id %}{{ url_for('film_page', imdb_id=entry.imdb_id) }}{% else %}{{ url_for('film_by_title', title=entry.title) }}{% endif %}">
+      <img src="{{ entry.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ entry.title }}">
+    </a>
+    <h5>{{ entry.title }}</h5>
+    {% if entry.rating %}
+    <div class="meta">
+      <span class="stars-display" data-rating="{{ entry.rating }}" style="--fill: {{ (entry.rating / 10 * 100)|round }}%"></span>
+      {% if entry.is_rewatch %} · rewatch{% endif %}
+    </div>
+    {% endif %}
+    <p class="byline" style="margin:0.35rem 0;">{{ entry.watched_date.strftime('%b %d, %Y') }}</p>
+    {% if entry.review %}
+      <p class="body-text" style="font-size:0.9rem;">{{ entry.review }}</p>
+    {% endif %}
+    <div class="review-actions justify-content-center">
+      <a href="{{ url_for('edit_diary', entry_id=entry.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+      <form action="{{ url_for('delete_diary', entry_id=entry.id) }}" method="POST" onsubmit="return confirm('Delete this diary entry?');">
+        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">No diary entries yet. Search a film and hit Log.</div>
+{% endif %}
+
+{% elif view == "lists" %}
+<div class="page-head">
+  <div>
+    <h1>Lists</h1>
+    <p class="lede">Curated shelves from your collection.</p>
+  </div>
+  <a href="{{ url_for('create_list') }}" class="btn btn-primary">Create List</a>
+</div>
+
+{% if lists %}
+  {% for lst in lists %}
+  <div class="list-row">
+    <div>
+      <h5>{{ lst.name }}</h5>
+      <p class="mb-0 text-muted">{{ lst.description }}</p>
+    </div>
+    <div class="actions">
+      <a href="{{ url_for('view_list', list_id=lst.id) }}" class="btn btn-sm btn-outline-secondary">View</a>
+      <a href="{{ url_for('edit_list', list_id=lst.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
+      <form action="{{ url_for('delete_list', list_id=lst.id) }}" method="POST" onsubmit="return confirm('Delete this list?');">
+        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+<div class="empty-state">You haven’t created any lists yet.</div>
+{% endif %}
+
+{% elif view == "view_list" %}
+<div class="page-head">
+  <div>
+    <h1>{{ movie_list.name }}</h1>
+    <p class="lede">{{ movie_list.description or "No description" }}</p>
+  </div>
+  <a href="{{ url_for('lists') }}" class="btn btn-secondary">Back to Lists</a>
+</div>
+
+<div class="form-panel form-panel--narrow mb-4">
+  <h3 style="font-size:1.25rem;margin-bottom:1rem;">Add a Movie</h3>
+  <form method="POST" action="{{ url_for('add_movie_to_list', list_id=movie_list.id) }}">
+    <div class="mb-3 position-relative">
+      <label for="movie-search" class="form-label">Search Movie</label>
+      <input type="text" name="title" id="movie-search" class="form-control" placeholder="Start typing..." autocomplete="off">
+      <div id="suggestions" class="search-dropdown"></div>
+    </div>
+    <input type="hidden" name="poster_url" id="poster-url">
+    <button type="submit" class="btn btn-primary">Add Movie</button>
+  </form>
+</div>
+
+<h2 class="mb-3">In This List</h2>
+{% if movie_list.movies %}
+<div class="poster-grid">
+  {% for movie in movie_list.movies %}
+  <div class="poster-card">
+    <div class="poster-tile">
+      <img src="{{ movie.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.title }}">
+    </div>
+    <h6>{{ movie.title }}</h6>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">No movies in this list yet.</div>
+{% endif %}
+
+{% elif view == "create_list" %}
+<div class="page-head">
+  <div>
+    <h1>Create List</h1>
+    <p class="lede">Start a new curated shelf.</p>
+  </div>
+</div>
+
+<div class="form-panel form-panel--narrow">
+  <form method="POST">
+    <div class="mb-3">
+      <label for="name" class="form-label">List Name</label>
+      <input type="text" name="name" id="name" class="form-control" required>
+    </div>
+    <div class="mb-3">
+      <label for="description" class="form-label">Description</label>
+      <textarea name="description" id="description" class="form-control" rows="3"></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Create List</button>
+  </form>
+</div>
+
+{% elif view == "edit_list" %}
+<div class="page-head">
+  <div>
+    <h1>Edit List</h1>
+    <p class="lede">Rename or redescribe this shelf.</p>
+  </div>
+</div>
+
+<div class="form-panel form-panel--narrow">
+  <form method="POST">
+    <div class="mb-3">
+      <label class="form-label">List Name</label>
+      <input type="text" name="name" class="form-control" value="{{ movie_list.name }}" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Description</label>
+      <textarea name="description" class="form-control" rows="3">{{ movie_list.description }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+  </form>
+</div>
+
+{% elif view == "settings" %}
+<div class="page-head">
+  <div>
+    <h1>Settings</h1>
+    <p class="lede">Account details and password.</p>
+  </div>
+</div>
+
+<div class="form-panel form-panel--narrow">
+  <form method="POST">
+    <div class="mb-3">
+      <label for="email" class="form-label">Email</label>
+      <input type="email" class="form-control" name="email" id="email" value="{{ current_user.email }}">
+    </div>
+
+    <hr>
+
+    <h3 style="font-size:1.2rem;margin-bottom:1rem;">Change Password</h3>
+    <div class="mb-3">
+      <label for="current_password" class="form-label">Current Password</label>
+      <input type="password" class="form-control" name="current_password" id="current_password">
+    </div>
+    <div class="mb-3">
+      <label for="new_password" class="form-label">New Password</label>
+      <input type="password" class="form-control" name="new_password" id="new_password">
+    </div>
+
+    <button type="submit" class="btn btn-primary">Save Settings</button>
+  </form>
+</div>
+
+{% elif view == "watchlist" %}
+<div class="page-head">
+  <div>
+    <h1>Watchlist</h1>
+    <p class="lede">Films waiting for their turn on your screen.</p>
+  </div>
+</div>
+
+{% if movies %}
+<div class="poster-grid">
+  {% for movie in movies %}
+  <div class="poster-card">
+    <a class="poster-tile" href="{{ url_for('film_by_title', title=movie.title) }}">
+      <img src="{{ movie.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.title }}">
+    </a>
+    <h5><a href="{{ url_for('film_by_title', title=movie.title) }}">{{ movie.title }}</a></h5>
+    <form method="POST" action="{{ url_for('remove_from_watchlist', movie_id=movie.id) }}">
+      <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state">Your watchlist is empty.</div>
+{% endif %}
+
+{% elif view == "popular" %}
+<div class="page-head">
+  <div>
+    <h1>Popular</h1>
+    <p class="lede">Titles drawing the most attention in the lobby.</p>
+  </div>
+</div>
+
+<div class="poster-grid">
+  {% for movie in movies %}
+  <a class="poster-card" href="{% if movie.imdb_id %}{{ url_for('film_page', imdb_id=movie.imdb_id) }}{% else %}{{ url_for('film_by_title', title=movie.movie) }}{% endif %}">
+    <div class="poster-tile">
+      <img src="{{ movie.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.movie }}">
+    </div>
+    <h5>{{ movie.movie }}</h5>
+    <div class="meta">
+      <span class="stars-display" data-rating="{{ movie.avg_rating|round|int }}" style="--fill: {{ (movie.avg_rating / 10 * 100)|round }}%"></span>
+      · {{ movie.review_count }} reviews
+    </div>
+  </a>
+  {% else %}
+  <div class="empty-state" style="grid-column:1/-1;">No popular titles yet.</div>
+  {% endfor %}
+</div>
+
+{% elif view == "add_post" %}
+<div class="page-head">
+  <div>
+    <h1>Add Review</h1>
+    <p class="lede">File a new notice on the lobby board.</p>
+  </div>
+</div>
+
+<div class="form-panel form-panel--narrow">
+  <form method="POST">
+    <div class="mb-3">
+      <label for="movie" class="form-label">Movie Title</label>
+      <input type="text" class="form-control" id="movie" name="movie" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Rating</label>
+      <div class="star-rating" data-name="rating" data-value="0"></div>
+    </div>
+    <div class="mb-3">
+      <label for="content" class="form-label">Review</label>
+      <textarea class="form-control" id="content" name="content" rows="4" required></textarea>
+    </div>
+    <div class="mb-3">
+      <label for="poster_url" class="form-label">Poster Image URL</label>
+      <input type="url" class="form-control" id="poster_url" name="poster_url">
+    </div>
+    <div class="mb-3">
+      <label for="imdb_id" class="form-label">TMDB ID (optional)</label>
+      <input type="text" class="form-control" id="imdb_id" name="imdb_id" placeholder="27205">
+    </div>
+    <button type="submit" class="btn btn-primary">Submit Review</button>
+  </form>
+</div>
+
+{% elif view == "add_review" %}
+<div class="page-head">
+  <div>
+    <h1>Write Review</h1>
+    <p class="lede">{{ movie.Title }}{% if movie.Year %} · {{ movie.Year }}{% endif %}</p>
+  </div>
+  {% if movie.imdbID %}
+  <a href="{{ url_for('film_page', imdb_id=movie.imdbID) }}" class="btn btn-secondary">Film Page</a>
+  {% endif %}
+</div>
+
+<div class="review-with-poster mb-4">
+  <div class="poster-tile">
+    <img src="{{ movie.Poster if movie.Poster != 'N/A' else 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.Title }}">
+  </div>
+  <div>
+    <p class="text-muted mb-2"><strong>Genre:</strong> {{ movie.Genre }}</p>
+    <p class="body-text">{{ movie.Plot }}</p>
+
+    <div class="form-panel mt-3">
+      <form method="POST">
+        <div class="mb-3">
+          <label class="form-label">Rating</label>
+          <div class="star-rating" data-name="rating" data-value="0"></div>
+        </div>
+        <div class="mb-3">
+          <label for="content" class="form-label">Your Review</label>
+          <textarea name="content" id="content" class="form-control" rows="4" required></textarea>
+        </div>
+        <button type="submit" class="btn btn-primary">Submit Review</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+{% elif view == "add_diary" %}
+<div class="page-head">
+  <div>
+    <h1>Add Diary Entry</h1>
+    <p class="lede">Log a screening while it’s still fresh.</p>
+  </div>
+</div>
+
+<div class="form-panel form-panel--narrow">
+  <form method="POST">
+    <div class="mb-3">
+      <label for="title" class="form-label">Movie Title</label>
+      <input type="text" class="form-control" id="title" name="title" required>
+    </div>
+    <div class="mb-3">
+      <label for="poster_url" class="form-label">Poster URL</label>
+      <input type="url" class="form-control" id="poster_url" name="poster_url">
+    </div>
+    <div class="mb-3">
+      <label for="imdb_id" class="form-label">TMDB ID (optional)</label>
+      <input type="text" class="form-control" id="imdb_id" name="imdb_id">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Rating</label>
+      <div class="star-rating" data-name="rating" data-value="0"></div>
+    </div>
+    <div class="mb-3">
+      <label for="watched_date" class="form-label">Watched Date</label>
+      <input type="date" class="form-control" id="watched_date" name="watched_date" value="{{ today }}" required>
+    </div>
+    <div class="mb-3 form-check">
+      <input class="form-check-input" type="checkbox" value="1" id="is_rewatch" name="is_rewatch">
+      <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-ui);color:var(--cream-muted);">Rewatch</label>
+    </div>
+    <div class="mb-3">
+      <label for="review" class="form-label">Your Thoughts</label>
+      <textarea class="form-control" id="review" name="review" rows="4" required></textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Save Entry</button>
+  </form>
+</div>
+
+{% elif view == "edit_post" %}
+<div class="page-head">
+  <div>
+    <h1>Edit Review</h1>
+    <p class="lede">Refine what you wrote about {{ post.movie }}.</p>
+  </div>
+</div>
+
+<div class="form-panel form-panel--narrow">
+  <form method="POST">
+    <div class="mb-3">
+      <label for="movie" class="form-label">Movie Title</label>
+      <input type="text" class="form-control" id="movie" name="movie" value="{{ post.movie }}" required>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Rating</label>
+      <div class="star-rating" data-name="rating" data-value="{{ post.rating }}"></div>
+    </div>
+    <div class="mb-3">
+      <label for="content" class="form-label">Content</label>
+      <textarea class="form-control" id="content" name="content" rows="4" required>{{ post.content }}</textarea>
+    </div>
+    <div class="mb-3">
+      <label for="poster_url" class="form-label">Poster URL</label>
+      <input type="url" class="form-control" id="poster_url" name="poster_url" value="{{ post.poster_url }}">
+    </div>
+    <div class="mb-3">
+      <label for="imdb_id" class="form-label">TMDB ID</label>
+      <input type="text" class="form-control" id="imdb_id" name="imdb_id" value="{{ post.imdb_id or '' }}">
+    </div>
+    <button type="submit" class="btn btn-primary">Update Review</button>
+  </form>
+</div>
+
+{% elif view == "edit_diary" %}
+<div class="page-head">
+  <div>
+    <h1>Edit Diary Entry</h1>
+    <p class="lede">Update your screening notes.</p>
+  </div>
+</div>
+
+<div class="form-panel form-panel--narrow">
+  <form method="POST">
+    <div class="mb-3">
+      <label for="title" class="form-label">Movie Title</label>
+      <input type="text" class="form-control" id="title" name="title" value="{{ entry.title }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="poster_url" class="form-label">Poster URL</label>
+      <input type="url" class="form-control" id="poster_url" name="poster_url" value="{{ entry.poster_url }}">
+    </div>
+    <div class="mb-3">
+      <label for="imdb_id" class="form-label">TMDB ID</label>
+      <input type="text" class="form-control" id="imdb_id" name="imdb_id" value="{{ entry.imdb_id or '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Rating</label>
+      <div class="star-rating" data-name="rating" data-value="{{ entry.rating or 0 }}"></div>
+    </div>
+    <div class="mb-3">
+      <label for="watched_date" class="form-label">Watched Date</label>
+      <input type="date" class="form-control" id="watched_date" name="watched_date" value="{{ entry.watched_date.strftime('%Y-%m-%d') }}" required>
+    </div>
+    <div class="mb-3 form-check">
+      <input class="form-check-input" type="checkbox" value="1" id="is_rewatch" name="is_rewatch" {% if entry.is_rewatch %}checked{% endif %}>
+      <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-ui);color:var(--cream-muted);">Rewatch</label>
+    </div>
+    <div class="mb-3">
+      <label for="review" class="form-label">Your Thoughts</label>
+      <textarea class="form-control" id="review" name="review" rows="4" required>{{ entry.review }}</textarea>
+    </div>
+    <button type="submit" class="btn btn-primary">Update Entry</button>
+  </form>
+</div>
+
+{% elif view == "bookmarks" %}
+<div class="page-head">
+  <div>
+    <h1>Bookmarks</h1>
+    <p class="lede">Saved for later.</p>
+  </div>
+</div>
+<div class="empty-state">No bookmarks yet.</div>
+
+{% else %}
+<div class="empty-state">Page not found.</div>
+{% endif %}
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='stars.js') }}"></script>
+  <script>
+    document.getElementById("navToggle")?.addEventListener("click", function () {
+      document.getElementById("siteNav")?.classList.toggle("is-open");
+    });
+  </script>
+{% if view == "dashboard" %}
+<script>
+document.getElementById('search-input').addEventListener('input', function () {
+    const query = this.value;
+    if (query.length < 2) {
+        document.getElementById('search-results').innerHTML = '';
+        return;
+    }
+
+    fetch(`/search_preview?query=${encodeURIComponent(query)}`)
+        .then(response => response.json())
+        .then(data => {
+            let resultsHTML = '';
+            data.forEach(movie => {
+                const poster = movie.Poster && movie.Poster !== 'N/A'
+                    ? movie.Poster
+                    : 'https://via.placeholder.com/40x60?text=?';
+                const href = movie.imdbID
+                    ? `/film/${movie.imdbID}`
+                    : `/film/title/${encodeURIComponent(movie.Title)}`;
+                resultsHTML += `
+                    <div class="search-result" onclick="window.location.href='${href}'">
+                        <img src="${poster}" alt="">
+                        <strong>${movie.Title}</strong>&nbsp;(${movie.Year})
+                    </div>`;
+            });
+            document.getElementById('search-results').innerHTML = resultsHTML;
+        });
+});
+</script>
+{% endif %}
+{% if view == "edit_profile" %}
+<script>
+function selectFavorite(pos, title, poster, imdb) {
+  document.getElementById('fav_title_' + pos).value = title;
+  document.getElementById('fav_poster_' + pos).value = poster;
+  document.getElementById('fav_imdb_' + pos).value = imdb || '';
+  document.getElementById('fav-img-' + pos).src = poster;
+  document.getElementById('fav-label-' + pos).textContent = title;
+  document.getElementById('fav-preview-' + pos).style.display = 'flex';
+  document.getElementById('fav-results-' + pos).innerHTML = '';
+}
+
+document.querySelectorAll('.fav-search').forEach((input) => {
+  input.addEventListener('input', function () {
+    const pos = this.dataset.pos;
+    const query = this.value;
+    const box = document.getElementById('fav-results-' + pos);
+    if (query.length < 2) {
+      box.innerHTML = '';
+      return;
+    }
+    fetch('/search_preview?query=' + encodeURIComponent(query))
+      .then((r) => r.json())
+      .then((data) => {
+        box.innerHTML = data.map((movie) => {
+          const poster = movie.Poster || '';
+          return `<button type="button" class="search-result" style="width:100%;border:none;background:transparent;text-align:left;"
+            onclick="selectFavorite(${pos}, ${JSON.stringify(movie.Title)}, ${JSON.stringify(poster)}, ${JSON.stringify(movie.imdbID || '')})">
+            <img src="${poster}" alt=""><span>${movie.Title} (${movie.Year})</span>
+          </button>`;
+        }).join('');
+      });
+  });
+});
+
+document.querySelectorAll('.fav-clear').forEach((btn) => {
+  btn.addEventListener('click', function () {
+    const pos = this.dataset.pos;
+    document.getElementById('fav_title_' + pos).value = '';
+    document.getElementById('fav_poster_' + pos).value = '';
+    document.getElementById('fav_imdb_' + pos).value = '';
+    document.getElementById('fav-preview-' + pos).style.display = 'none';
+  });
+});
+</script>
+{% endif %}
+{% if view == "view_list" %}
+<script>
+document.getElementById('movie-search').addEventListener('input', function () {
+    const query = this.value;
+    const resultsBox = document.getElementById('suggestions');
+    if (query.length < 2) {
+        resultsBox.innerHTML = '';
+        return;
+    }
+
+    fetch(`/search_preview?query=${encodeURIComponent(query)}`)
+        .then(response => response.json())
+        .then(data => {
+            let html = '';
+            data.forEach(movie => {
+                const poster = movie.Poster && movie.Poster !== 'N/A'
+                    ? movie.Poster
+                    : 'https://via.placeholder.com/40x60?text=?';
+                const safeTitle = movie.Title.replace(/'/g, "\\'");
+                const safePoster = (movie.Poster || '').replace(/'/g, "\\'");
+                html += `
+                    <button type="button" class="search-result" style="width:100%;border:none;background:transparent;text-align:left;"
+                      onclick="selectMovie('${safeTitle}', '${safePoster}')">
+                        <img src="${poster}" alt="">
+                        ${movie.Title} (${movie.Year})
+                    </button>
+                `;
+            });
+            resultsBox.innerHTML = html;
+        });
+});
+
+function selectMovie(title, poster) {
+    document.getElementById('movie-search').value = title;
+    document.getElementById('poster-url').value = poster;
+    document.getElementById('suggestions').innerHTML = '';
+}
+</script>
+{% endif %}
+</body>
+</html>

@@ -7,6 +7,7 @@
   {% elif view == "signup" %}Sign Up — Filmboxed
   {% elif view == "home" %}Filmboxed — Your life in film
   {% elif view == "film" %}{{ movie.Title }} — Filmboxed
+  {% elif view == "person" %}{{ person.name }} — Filmboxed
   {% elif view == "log_film" %}Log {{ movie.Title }} — Filmboxed
   {% elif view == "dashboard" %}Dashboard — Filmboxed
   {% elif view == "search" %}Search — Filmboxed
@@ -15,10 +16,10 @@
   {% elif view == "edit_profile" %}Edit Profile — Filmboxed
   {% elif view == "feed" %}Feed — Filmboxed
   {% elif view == "diary" %}Diary — Filmboxed
-  {% elif view == "lists" %}Lists — Filmboxed
+  {% elif view == "lists" %}Stack — Filmboxed
   {% elif view == "view_list" %}{{ movie_list.name }} — Filmboxed
-  {% elif view == "create_list" %}Create List — Filmboxed
-  {% elif view == "edit_list" %}Edit List — Filmboxed
+  {% elif view == "create_list" %}New Stack — Filmboxed
+  {% elif view == "edit_list" %}Edit Stack — Filmboxed
   {% elif view == "settings" %}Settings — Filmboxed
   {% elif view == "watchlist" %}Watchlist — Filmboxed
   {% elif view == "popular" %}Popular — Filmboxed
@@ -34,7 +35,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
@@ -42,7 +43,7 @@
 
   <header class="site-header">
     <div class="site-header__inner">
-      <a class="brand" href="{% if current_user.is_authenticated %}{{ url_for('dashboard') }}{% else %}{{ url_for('home') }}{% endif %}">
+      <a class="brand" href="{{ url_for('home') }}">
         FILM<span>BOXED</span>
       </a>
 
@@ -52,10 +53,8 @@
         <a class="{% if view in ['home', 'popular'] %}is-active{% endif %}" href="{{ url_for('home') }}">Films</a>
         <a class="{% if view == 'schedule' %}is-active{% endif %}" href="{{ url_for('schedule') }}">Schedule</a>
         <a class="{% if view == 'diary' %}is-active{% endif %}" href="{{ url_for('diary') }}">Diary</a>
-        <a class="{% if view == 'lists' %}is-active{% endif %}" href="{{ url_for('lists') }}">Lists</a>
+        <a class="{% if view == 'lists' %}is-active{% endif %}" href="{{ url_for('lists') }}">Stack</a>
         <a class="{% if view == 'watchlist' %}is-active{% endif %}" href="{{ url_for('watchlist') }}">Watchlist</a>
-        <a class="{% if view == 'profile' %}is-active{% endif %}" href="{{ url_for('user_profile', username=current_user.username) }}">Profile</a>
-        <a class="{% if view == 'dashboard' %}is-active{% endif %}" href="{{ url_for('dashboard') }}">Dashboard</a>
         <a class="nav-search {% if view == 'search' %}is-active{% endif %}" href="{{ url_for('search_movie') }}" aria-label="Search" title="Search">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="11" cy="11" r="7"></circle>
@@ -69,24 +68,33 @@
           {{ current_user.username }}
         </a>
         <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
+          <li><a class="dropdown-item" href="{{ url_for('user_profile', username=current_user.username) }}">Profile</a></li>
           <li><a class="dropdown-item" href="{{ url_for('edit_profile') }}">Edit Profile</a></li>
+          <li><a class="dropdown-item" href="{{ url_for('dashboard') }}">Dashboard</a></li>
           <li><a class="dropdown-item" href="{{ url_for('settings') }}">Settings</a></li>
           <li><a class="dropdown-item" href="{{ url_for('logout') }}">Sign Out</a></li>
         </ul>
       </div>
+      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme">
+        Theme
+      </button>
       {% else %}
       <nav class="site-nav" style="display:flex;">
+        <a class="{% if view == 'lists' %}is-active{% endif %}" href="{{ url_for('lists') }}">Stack</a>
         <a class="{% if view == 'login' %}is-active{% endif %}" href="{{ url_for('login') }}">Login</a>
         <a class="{% if view == 'signup' %}is-active{% endif %}" href="{{ url_for('signup') }}">Sign Up</a>
       </nav>
+      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme">
+        Theme
+      </button>
       {% endif %}
     </div>
   </header>
 
-  <main class="{% if view == 'login' or view == 'signup' %}{% else %}page-shell{% endif %}">
+  <main class="{% if view == 'login' or view == 'signup' %}{% elif view == 'home' %}landing-main{% elif view == 'schedule' %}schedule-shell{% elif view == 'film' %}film-shell{% else %}page-shell{% endif %}">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <div class="flash-stack">
+        <div class="flash-stack{% if view == 'home' %} page-shell{% endif %}">
           {% for category, message in messages %}
             <div class="alert alert-{{ category }}">{{ message }}</div>
           {% endfor %}
@@ -149,23 +157,41 @@
 </div>
 
 {% elif view == "home" %}
-<div class="page-head">
-  <div>
-    <h1>Now Showing</h1>
-    <p class="lede">Discover, rate, and remember — cinema lobby style.</p>
+<section class="landing-hero landing-hero--cover" aria-label="Trending now">
+  {% if weekly_trending_movies %}
+  <div class="landing-hero__pan" aria-label="This week's releases">
+    <div class="landing-hero__track">
+      {% for movie in weekly_trending_movies %}
+      <a class="hero-still" href="{{ url_for('film_page', imdb_id=movie.id) }}" title="{{ movie.title }}">
+        <img src="{{ movie.image or movie.poster }}" alt="{{ movie.title }}" loading="lazy">
+        <span class="hero-still__cap">
+          <span class="hero-still__title">{{ movie.title }}</span>
+        </span>
+      </a>
+      {% endfor %}
+      {% for movie in weekly_trending_movies %}
+      <a class="hero-still" href="{{ url_for('film_page', imdb_id=movie.id) }}" title="{{ movie.title }}" aria-hidden="true" tabindex="-1">
+        <img src="{{ movie.image or movie.poster }}" alt="" loading="lazy">
+        <span class="hero-still__cap">
+          <span class="hero-still__title">{{ movie.title }}</span>
+        </span>
+      </a>
+      {% endfor %}
+    </div>
   </div>
-  {% if current_user.is_authenticated %}
-  <a href="{{ url_for('search_movie') }}" class="btn btn-primary">Find a Film</a>
   {% endif %}
-</div>
-
-<form action="{{ url_for('search_movie') }}" method="get" class="search-box mb-2">
-  <div class="input-group">
-    <input type="text" name="query" class="form-control" placeholder="Search films..." required>
-    <button type="submit" class="btn btn-secondary">Search</button>
+  <div class="landing-hero__shade" aria-hidden="true"></div>
+  <div class="landing-hero__content">
+    <div class="landing-hero__cta">
+      <a href="{{ url_for('search_movie') }}" class="btn btn-primary">Explore Reviews →</a>
+    </div>
+    {% if not weekly_trending_movies and not tmdb_configured %}
+    <p class="landing-hero__empty">Add your TMDB API key to load new releases.</p>
+    {% endif %}
   </div>
-</form>
+</section>
 
+<div class="page-shell">
 {% if popular_movies %}
 <section class="band">
   <div class="band-head">
@@ -188,97 +214,78 @@
 </section>
 {% endif %}
 
-<section class="band">
-  <div class="band-head">
-    <h2>Recent Reviews</h2>
-  </div>
-  <div class="review-stream">
-    {% for post in posts %}
-    <article class="review-row">
-      <a class="poster-tile" href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">
-        {% if post.poster_url %}
-          <img src="{{ post.poster_url }}" alt="Poster for {{ post.movie }}">
-        {% else %}
-          <img src="https://via.placeholder.com/200x300?text=No+Poster" alt="No poster">
-        {% endif %}
-      </a>
-      <div class="review-meta">
-        <h2 class="film-title">
-          <a href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">{{ post.movie }}</a>
-        </h2>
-        <div class="stars-display" data-rating="{{ post.rating }}" style="--fill: {{ (post.rating / 10 * 100)|round }}%"></div>
-        <p class="byline">
-          {% if post.author %}
-            <a href="{{ url_for('user_profile', username=post.author.username) }}">{{ post.author.username }}</a>
-          {% endif %}
-          · {{ post.created_at.strftime('%b %d, %Y') }}
-        </p>
-        <p class="body-text">{{ post.content }}</p>
+<section class="landing-footer" id="landing-footer" aria-label="More from Filmboxed">
+  <div class="landing-footer__grid">
+    <a class="landing-promo landing-promo--community" href="{{ community_url }}" target="_blank" rel="noopener noreferrer">
+      <p class="landing-promo__eyebrow">Join the Community</p>
+      <h3 class="landing-promo__title">Talk films live</h3>
+      <p class="landing-promo__copy">Text, voice &amp; video rooms with 100+ members. Jump in anytime.</p>
+      <span class="landing-promo__cta">Enter lounge →</span>
+    </a>
 
-        {% if current_user.is_authenticated %}
-        <div class="review-actions">
-          <form action="{{ url_for('like_post', post_id=post.id) }}" method="POST">
-            <button type="submit" class="btn btn-sm btn-outline-primary">Like · {{ post.likes or 0 }}</button>
-          </form>
-          {% if current_user.id == post.user_id %}
-            <a href="{{ url_for('edit_post', post_id=post.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
-            <a href="{{ url_for('delete_post', post_id=post.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('Delete this review?');">Delete</a>
-          {% endif %}
-        </div>
-        {% endif %}
-      </div>
-    </article>
-    {% else %}
-    <div class="empty-state">No reviews yet. Search a film and log your first watch.</div>
-    {% endfor %}
-  </div>
+    <a class="landing-promo landing-promo--stack" href="{% if current_user.is_authenticated %}{{ url_for('lists') }}{% else %}{{ url_for('signup') }}{% endif %}">
+      <p class="landing-promo__eyebrow">Stack</p>
+      <h3 class="landing-promo__title">Build your film stack</h3>
+      <p class="landing-promo__copy">Curate shelves, themed piles, and watch-next stacks worth revisiting.</p>
+      <span class="landing-promo__cta">Open stacks →</span>
+    </a>
 
-  {% if posts.pages > 1 %}
-  <nav class="d-flex justify-content-center mt-4" aria-label="Pagination">
-    <ul class="pagination">
-      <li class="page-item {% if not posts.has_prev %}disabled{% endif %}">
-        <a class="page-link" href="{{ url_for('home', page=posts.prev_num) if posts.has_prev else '#' }}">Previous</a>
-      </li>
-      <li class="page-item active"><a class="page-link">{{ posts.page }}</a></li>
-      <li class="page-item {% if not posts.has_next %}disabled{% endif %}">
-        <a class="page-link" href="{{ url_for('home', page=posts.next_num) if posts.has_next else '#' }}">Next</a>
-      </li>
-    </ul>
-  </nav>
-  {% endif %}
-</section>
-
-{% if featured_lists %}
-<section class="band">
-  <div class="band-head">
-    <h2>Lists</h2>
-    {% if current_user.is_authenticated %}
-    <a href="{{ url_for('lists') }}">Your lists</a>
-    {% endif %}
-  </div>
-  {% for lst in featured_lists %}
-  <div class="list-row">
-    <div>
-      <h5>{{ lst.name }}</h5>
-      <p class="mb-0 text-muted">{{ lst.description or 'A curated shelf.' }}</p>
+    <div class="landing-promo landing-promo--newsletter">
+      <p class="landing-promo__icon" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 4h16v16H4z"></path>
+          <path d="m4 4 8 8 8-8"></path>
+        </svg>
+      </p>
+      <h3 class="landing-promo__title">Stay in the loop.</h3>
+      <p class="landing-promo__copy">New reviews, stacks and community drops straight to your inbox.</p>
+      <form class="landing-newsletter__form" action="{{ url_for('newsletter_subscribe') }}" method="POST">
+        <label class="visually-hidden" for="newsletterEmail">Email</label>
+        <input class="form-control" type="email" name="email" id="newsletterEmail" placeholder="Enter your email" required>
+        <button class="btn btn-primary landing-newsletter__submit" type="submit" aria-label="Subscribe">→</button>
+      </form>
     </div>
-    {% if current_user.is_authenticated and lst.user_id == current_user.id %}
-    <div class="actions">
-      <a href="{{ url_for('view_list', list_id=lst.id) }}" class="btn btn-sm btn-outline-secondary">View</a>
-    </div>
-    {% endif %}
   </div>
-  {% endfor %}
+
+  <div class="landing-quote-bar" data-quote-bar>
+    <blockquote class="landing-quote-bar__quote is-active" data-quote>
+      <span class="landing-quote-bar__mark" aria-hidden="true">“</span>
+      <p>Cinema is a mirror by which we often see ourselves. <cite>— Alejandro González Iñárritu</cite></p>
+    </blockquote>
+    <blockquote class="landing-quote-bar__quote" data-quote hidden>
+      <span class="landing-quote-bar__mark" aria-hidden="true">“</span>
+      <p>Films stay. Opinions matter. That’s the whole point. <cite>— Filmboxed</cite></p>
+    </blockquote>
+    <blockquote class="landing-quote-bar__quote" data-quote hidden>
+      <span class="landing-quote-bar__mark" aria-hidden="true">“</span>
+      <p>A film is never really good unless the camera is an eye in the head of a poet. <cite>— Orson Welles</cite></p>
+    </blockquote>
+    <div class="landing-quote-bar__dots" role="tablist" aria-label="Quotes">
+      <button type="button" class="is-active" aria-label="Quote 1" data-quote-dot></button>
+      <button type="button" aria-label="Quote 2" data-quote-dot></button>
+      <button type="button" aria-label="Quote 3" data-quote-dot></button>
+    </div>
+  </div>
 </section>
-{% endif %}
+</div>
 
 {% elif view == "film" %}
-{% if movie.Backdrop %}
-<div class="film-backdrop" style="background-image:url('{{ movie.Backdrop }}')"></div>
-{% endif %}
+<div class="film-page{% if movie.Backdrop %} has-cover{% endif %}">
+  {% if movie.Backdrop %}
+  <div class="film-cover" aria-hidden="true">
+    <img class="film-cover__img" src="{{ movie.Backdrop }}" alt="">
+    <div class="film-cover__fade"></div>
+  </div>
+  {% endif %}
+  <div class="page-shell film-page__body">
 <section class="film-hub">
   <div class="film-hub__poster poster-tile">
     <img src="{{ movie.Poster if movie.Poster != 'N/A' else 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.Title }}">
+    <div class="film-hub__poster-meta">
+      <span>{{ movie.Year }}</span>
+      {% if movie.Runtime and movie.Runtime != 'N/A' %}<span>{{ movie.Runtime }}</span>{% endif %}
+      {% if movie.Genre and movie.Genre != 'N/A' %}<span>{{ movie.Genre.split(',')[0] }}</span>{% endif %}
+    </div>
   </div>
   <div class="film-hub__meta">
     <p class="eyebrow">Film</p>
@@ -294,7 +301,7 @@
     {% if user_rating %}
       <div class="mb-2">
         <span class="stars-display" data-rating="{{ user_rating }}" style="--fill: {{ (user_rating / 10 * 100)|round }}%"></span>
-        <span class="text-muted ms-2" style="font-family:var(--font-ui);font-size:0.8rem;">Your rating</span>
+        <span class="text-muted ms-2" style="font-family:var(--font-body);font-size:0.8rem;">Your rating</span>
       </div>
     {% endif %}
 
@@ -302,14 +309,6 @@
 
     {% if current_user.is_authenticated %}
     <div class="action-strip">
-      <a class="btn btn-primary" href="{{ url_for('log_film', imdb_id=movie.imdbID) }}">Log</a>
-      <a class="btn btn-secondary" href="{{ url_for('add_review', movie_title=movie.Title) }}">Review</a>
-      <form action="{{ url_for('mark_watched', imdb_id=movie.imdbID) }}" method="POST">
-        <button type="submit" class="btn btn-{{ 'primary' if watched else 'secondary' }}">{{ 'Seen' if watched else 'Mark seen' }}</button>
-      </form>
-      <form action="{{ url_for('like_film', imdb_id=movie.imdbID) }}" method="POST">
-        <button type="submit" class="btn btn-{{ 'primary' if liked else 'secondary' }}">{{ 'Liked' if liked else 'Like' }}{% if like_count %} · {{ like_count }}{% endif %}</button>
-      </form>
       {% if not in_watchlist %}
       <form action="{{ url_for('add_to_watchlist') }}" method="POST">
         <input type="hidden" name="title" value="{{ movie.Title }}">
@@ -326,28 +325,49 @@
       {% endif %}
     </div>
 
-    <form class="rate-review form-panel" action="{{ url_for('rate_film', imdb_id=movie.imdbID) }}" method="POST">
-      <div class="rate-review__stars">
-        <label class="form-label mb-0">Your rating</label>
-        <div class="star-rating" data-name="rating" data-value="{{ user_rating or 0 }}"></div>
-      </div>
-      <div class="rate-review__text">
-        <label for="film-review-text" class="form-label">Your thoughts</label>
-        <textarea
-          class="form-control"
-          id="film-review-text"
-          name="content"
-          rows="4"
-          placeholder="What did you think? Share a few words about the film..."
-        >{{ user_review or '' }}</textarea>
-      </div>
-      <button type="submit" class="btn btn-primary">Save to diary</button>
-      <p class="rate-review__hint text-muted">Rating or writing about a film is saved to your diary automatically.</p>
-    </form>
+    <div class="rate-review-box">
+      <form class="rate-review-like-form" action="{{ url_for('like_film', imdb_id=movie.imdbID) }}" method="POST">
+        <button
+          type="submit"
+          class="rate-review-like btn-like{% if liked %} is-liked{% endif %}"
+          aria-label="{{ 'Unlike this film' if liked else 'Like this film' }}"
+          title="{{ 'Unlike this film' if liked else 'Like this film' }}"
+        >
+          <span class="btn-like__icon" aria-hidden="true">{% if liked %}❤️{% else %}💔{% endif %}</span>
+          {% if like_count %}<span class="btn-like__count">{{ like_count }}</span>{% endif %}
+        </button>
+      </form>
+
+      <form class="rate-review form-panel" action="{{ url_for('rate_film', imdb_id=movie.imdbID) }}" method="POST">
+        <div class="rate-review__stars">
+          <label class="form-label mb-0">Your rating</label>
+          <div class="star-rating" data-name="rating" data-value="{{ user_rating or 0 }}"></div>
+          {% if user_rating %}
+          <span class="rate-review__feel">
+            {% if user_rating >= 8 %}Loved it!{% elif user_rating >= 6 %}Liked it{% elif user_rating >= 4 %}Mixed feelings{% else %}Not for me{% endif %}
+          </span>
+          {% endif %}
+        </div>
+        <div class="rate-review__text">
+          <label for="film-review-text" class="form-label"><span aria-hidden="true">✦</span> Your thoughts</label>
+          <textarea
+            class="form-control"
+            id="film-review-text"
+            name="content"
+            rows="4"
+            maxlength="1000"
+            placeholder="What did you think? Share a few words about the film..."
+          >{{ user_review or '' }}</textarea>
+          <div class="rate-review__counter">{{ (user_review or '')|length }}/1000</div>
+        </div>
+        <button type="submit" class="btn btn-primary">Save review</button>
+        <p class="rate-review__hint text-muted">Rating or reviewing saves to your diary and marks the film as seen.</p>
+      </form>
+    </div>
 
     {% if user_lists %}
     <form class="form-panel mt-3" action="{{ url_for('add_film_to_user_list', imdb_id=movie.imdbID) }}" method="POST">
-      <label class="form-label">Add to list</label>
+      <label class="form-label">Add to stack</label>
       <div class="d-flex gap-2 flex-wrap">
         <select name="list_id" class="form-control" style="max-width:240px;" required>
           {% for lst in user_lists %}
@@ -485,7 +505,7 @@
   <div class="band-head"><h2>Cast</h2></div>
   <div class="cast-rail">
     {% for person in movie.Cast %}
-    <div class="cast-card">
+    <a class="cast-card" href="{{ url_for('person_page', person_id=person.id) }}">
       {% if person.photo %}
         <img src="{{ person.photo }}" alt="{{ person.name }}">
       {% else %}
@@ -493,7 +513,7 @@
       {% endif %}
       <strong>{{ person.name }}</strong>
       <span>{{ person.character }}</span>
-    </div>
+    </a>
     {% endfor %}
   </div>
 </section>
@@ -504,7 +524,7 @@
   <div class="band-head"><h2>Crew</h2></div>
   <div class="cast-rail">
     {% for person in movie.Crew %}
-    <div class="cast-card">
+    <a class="cast-card" href="{{ url_for('person_page', person_id=person.id) }}">
       {% if person.photo %}
         <img src="{{ person.photo }}" alt="{{ person.name }}">
       {% else %}
@@ -512,7 +532,7 @@
       {% endif %}
       <strong>{{ person.name }}</strong>
       <span>{{ person.job }}</span>
-    </div>
+    </a>
     {% endfor %}
   </div>
 </section>
@@ -562,6 +582,66 @@
     {% endfor %}
   </div>
 </section>
+  </div>
+</div>
+
+{% elif view == "person" %}
+<article class="person-page">
+  <div class="person-hero">
+    <div class="person-hero__photo">
+      {% if person.photo %}
+      <img src="{{ person.photo }}" alt="{{ person.name }}">
+      {% else %}
+      <div class="person-hero__placeholder"></div>
+      {% endif %}
+    </div>
+    <div class="person-hero__body">
+      <h1 class="person-hero__name">{{ person.name }}</h1>
+      {% if person.known_for %}
+      <p class="person-hero__dept">{{ person.known_for }}</p>
+      {% endif %}
+      <ul class="person-hero__facts">
+        {% if person.birthday_label %}
+        <li><span>Born</span> {{ person.birthday_label }}{% if person.place_of_birth %} · {{ person.place_of_birth }}{% endif %}</li>
+        {% elif person.place_of_birth %}
+        <li><span>From</span> {{ person.place_of_birth }}</li>
+        {% endif %}
+        {% if person.deathday %}
+        <li><span>Died</span> {{ person.deathday }}</li>
+        {% endif %}
+        <li><span>Credits</span> {{ person.film_count }}</li>
+      </ul>
+      {% if person.bio %}
+      <p class="person-hero__bio">{{ person.bio }}</p>
+      {% else %}
+      <p class="person-hero__bio person-hero__bio--empty">No biography available.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <section class="band person-filmography">
+    <div class="band-head">
+      <h2>Filmography</h2>
+    </div>
+    {% if person.filmography %}
+    <div class="poster-rail person-filmography__rail">
+      {% for film in person.filmography[:60] %}
+      <a class="poster-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
+        <div class="poster-tile">
+          <img src="{{ film.poster or 'https://via.placeholder.com/200x300?text=No+Poster' }}" alt="{{ film.title }}">
+        </div>
+        <h5>{{ film.title }}</h5>
+        <div class="meta">
+          {% if film.year %}{{ film.year }} · {% endif %}{{ film.roles[0] if film.roles else '' }}{% if film.roles|length > 1 %}, +{{ film.roles|length - 1 }}{% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">No film credits found.</div>
+    {% endif %}
+  </section>
+</article>
 
 {% elif view == "log_film" %}
 <div class="page-head">
@@ -590,7 +670,7 @@
 
       <div class="mb-3 form-check">
         <input class="form-check-input" type="checkbox" value="1" id="is_rewatch" name="is_rewatch">
-        <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-ui);color:var(--cream-muted);">
+        <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-body);color:var(--cream-muted);">
           This was a rewatch
         </label>
       </div>
@@ -698,124 +778,209 @@
 {% endif %}
 
 {% elif view == "schedule" %}
-<div class="page-head">
-  <div>
-    <h1>Schedule</h1>
-    <p class="lede">Worldwide theatrical openings and digital / OTT releases. Updated {{ as_of.strftime('%b %d, %Y') }}.</p>
-  </div>
-  <div class="schedule-jump">
-    <a href="#upcoming-theatrical">Theaters</a>
-    <a href="#now-playing">Now playing</a>
-    <a href="#ott-upcoming">Coming to OTT</a>
-    <a href="#ott-recent">New on OTT</a>
+{% if selected_lang %}
+{# ---------- Dedicated language releases page (same board as main schedule) ---------- #}
+<div class="schedule-board schedule-board--lang">
+  <aside class="schedule-side" aria-label="Language schedule">
+    <a class="schedule-side__item" href="{{ url_for('schedule', status='languages') }}">
+      <span class="schedule-side__icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M15 18l-6-6 6-6"/></svg>
+      </span>
+      All languages
+    </a>
+  </aside>
+
+  <div class="schedule-main">
+    <div class="schedule-lang-head">
+      <h1>{{ selected_lang_label }} releases</h1>
+      <p class="schedule-lang-head__sub">This week onwards · theatrical &amp; OTT</p>
+    </div>
+
+    <div class="schedule-toolbar">
+      <div class="schedule-pills" role="tablist" aria-label="{{ selected_lang_label }} release type">
+        <button type="button" class="schedule-pill lang-kind-filter{% if lang_kind == 'theatrical' %} is-active{% endif %}" data-lang-kind="theatrical" role="tab" aria-selected="{{ 'true' if lang_kind == 'theatrical' else 'false' }}">
+          {% if lang_kind == 'theatrical' %}<span class="schedule-pill__check" aria-hidden="true">✓</span>{% endif %}
+          In Theatres
+        </button>
+        <button type="button" class="schedule-pill lang-kind-filter{% if lang_kind == 'ott' %} is-active{% endif %}" data-lang-kind="ott" role="tab" aria-selected="{{ 'true' if lang_kind == 'ott' else 'false' }}">
+          {% if lang_kind == 'ott' %}<span class="schedule-pill__check" aria-hidden="true">✓</span>{% endif %}
+          On OTT
+        </button>
+      </div>
+      <div class="schedule-pills" role="group" aria-label="Schedule filters">
+        <a class="schedule-pill is-active" href="{{ url_for('schedule', status='languages', lang=selected_lang, kind=lang_kind) }}">Languages</a>
+      </div>
+      <p class="schedule-updated">Updated {{ as_of.strftime('%b %d, %Y') }}</p>
+    </div>
+
+    <section class="lang-kind-panel{% if lang_kind != 'theatrical' %} is-hidden{% endif %}" data-lang-panel="theatrical">
+      {% if lang_theatrical_groups %}
+      <div class="schedule-timeline">
+        {% for group in lang_theatrical_groups %}
+        <section class="schedule-day">
+          <div class="schedule-day__badge" aria-label="{{ group.weekday }} {{ group.day_num }} {{ group.month }}">
+            <span class="schedule-day__weekday">{{ group.weekday }}</span>
+            <span class="schedule-day__num">{{ group.day_num }}</span>
+            {% if group.month %}<span class="schedule-day__month">{{ group.month }}</span>{% endif %}
+          </div>
+          <div class="schedule-day__grid">
+            {% for film in group.films %}
+            <a class="schedule-poster" href="{{ url_for('film_page', imdb_id=film.id) }}" title="{{ film.title }}">
+              <div class="schedule-poster__art">
+                <img src="{{ film.poster }}" alt="{{ film.title }}" loading="lazy">
+              </div>
+              <h3 class="schedule-poster__title">{{ film.title }}</h3>
+              <p class="schedule-poster__meta">{{ film.platform_label }}{% if film.year %} · {{ film.year }}{% endif %}</p>
+            </a>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">No {{ selected_lang_label }} theatrical releases from this week onwards.</div>
+      {% endif %}
+    </section>
+
+    <section class="lang-kind-panel{% if lang_kind != 'ott' %} is-hidden{% endif %}" data-lang-panel="ott">
+      {% if lang_ott_groups %}
+      <div class="schedule-timeline">
+        {% for group in lang_ott_groups %}
+        <section class="schedule-day">
+          <div class="schedule-day__badge" aria-label="{{ group.weekday }} {{ group.day_num }} {{ group.month }}">
+            <span class="schedule-day__weekday">{{ group.weekday }}</span>
+            <span class="schedule-day__num">{{ group.day_num }}</span>
+            {% if group.month %}<span class="schedule-day__month">{{ group.month }}</span>{% endif %}
+          </div>
+          <div class="schedule-day__grid">
+            {% for film in group.films %}
+            <a class="schedule-poster" href="{{ url_for('film_page', imdb_id=film.id) }}" title="{{ film.title }}">
+              <div class="schedule-poster__art">
+                <img src="{{ film.poster }}" alt="{{ film.title }}" loading="lazy">
+              </div>
+              <h3 class="schedule-poster__title">{{ film.title }}</h3>
+              <p class="schedule-poster__meta">{{ film.platform_label }}{% if film.year %} · {{ film.year }}{% endif %}</p>
+            </a>
+            {% endfor %}
+          </div>
+        </section>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state">No {{ selected_lang_label }} OTT releases from this week onwards.</div>
+      {% endif %}
+    </section>
   </div>
 </div>
 
-<section class="band" id="upcoming-theatrical">
-  <div class="band-head">
-    <h2>Upcoming theatrical</h2>
-    <span class="text-muted" style="font-family:var(--font-ui);font-size:0.78rem;">US · IN · GB · JP · FR · more</span>
-  </div>
-  {% if upcoming %}
-  <div class="schedule-grid">
-    {% for film in upcoming %}
-    <a class="schedule-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
-      <div class="poster-tile">
-        <img src="{{ film.poster }}" alt="{{ film.title }}">
+{% else %}
+{# ---------- Main schedule (Moctale-style) ---------- #}
+<div class="schedule-board">
+  <aside class="schedule-side" aria-label="Schedule status">
+    <a class="schedule-side__item{% if schedule_status == 'released' %} is-active{% endif %}" href="{{ url_for('schedule', status='released', platform=schedule_platform, media=schedule_media) }}">
+      <span class="schedule-side__icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>
+      </span>
+      Released
+    </a>
+    <a class="schedule-side__item{% if schedule_status == 'upcoming' %} is-active{% endif %}" href="{{ url_for('schedule', status='upcoming', platform=schedule_platform, media=schedule_media) }}">
+      <span class="schedule-side__icon" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+      </span>
+      Upcoming
+    </a>
+  </aside>
+
+  <div class="schedule-main">
+    {% if schedule_status != 'languages' %}
+    <div class="schedule-toolbar">
+      <div class="schedule-pills" role="group" aria-label="Media type">
+        <a class="schedule-pill{% if schedule_media == 'all' %} is-active{% endif %}" href="{{ url_for('schedule', status=schedule_status, platform=schedule_platform, media='all') }}">All</a>
+        <a class="schedule-pill{% if schedule_media == 'movies' %} is-active{% endif %}" href="{{ url_for('schedule', status=schedule_status, platform=schedule_platform, media='movies') }}">Movies</a>
+        <a class="schedule-pill{% if schedule_media == 'shows' %} is-active{% endif %}" href="{{ url_for('schedule', status=schedule_status, platform='ott', media='shows') }}">Shows</a>
       </div>
-      <div class="schedule-card__body">
-        <span class="schedule-badge schedule-badge--theater">Theatrical</span>
-        <h3>{{ film.title }}</h3>
-        <p class="schedule-card__date">{{ film.release_label }}</p>
-        {% if film.regions %}
-        <p class="schedule-card__regions">{{ film.regions|join(' · ') }}</p>
+
+      <div class="schedule-pills" role="group" aria-label="More filters">
+        {% if schedule_media == 'movies' %}
+        <a class="schedule-pill{% if schedule_platform == 'theaters' %} is-active{% endif %}" href="{{ url_for('schedule', status=schedule_status, platform='theaters', media='movies') }}">
+          {% if schedule_platform == 'theaters' %}<span class="schedule-pill__check" aria-hidden="true">✓</span>{% endif %}
+          In Theatres
+        </a>
+        <a class="schedule-pill{% if schedule_platform == 'ott' %} is-active{% endif %}" href="{{ url_for('schedule', status=schedule_status, platform='ott', media='movies') }}">
+          {% if schedule_platform == 'ott' %}<span class="schedule-pill__check" aria-hidden="true">✓</span>{% endif %}
+          On OTT
+        </a>
         {% endif %}
+        <a class="schedule-pill" href="{{ url_for('schedule', status='languages') }}">Languages</a>
       </div>
-    </a>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="empty-state">No upcoming theatrical releases found.</div>
-  {% endif %}
-</section>
+      <p class="schedule-updated">Updated {{ as_of.strftime('%b %d, %Y') }}</p>
+    </div>
 
-<section class="band" id="now-playing">
-  <div class="band-head">
-    <h2>Now in theaters</h2>
-  </div>
-  {% if now_playing %}
-  <div class="schedule-grid">
-    {% for film in now_playing %}
-    <a class="schedule-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
-      <div class="poster-tile">
-        <img src="{{ film.poster }}" alt="{{ film.title }}">
-      </div>
-      <div class="schedule-card__body">
-        <span class="schedule-badge schedule-badge--theater">In theaters</span>
-        <h3>{{ film.title }}</h3>
-        <p class="schedule-card__date">{% if film.release_label != 'TBA' %}Opened {{ film.release_label }}{% else %}Now screening{% endif %}</p>
-        {% if film.regions %}
-        <p class="schedule-card__regions">{{ film.regions|join(' · ') }}</p>
-        {% endif %}
-      </div>
-    </a>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="empty-state">No current theatrical titles found.</div>
-  {% endif %}
-</section>
+    {% if schedule_groups %}
+    <div class="schedule-timeline">
+      {% for group in schedule_groups %}
+      <section class="schedule-day">
+        <div class="schedule-day__badge" aria-label="{{ group.weekday }} {{ group.day_num }} {{ group.month }}">
+          <span class="schedule-day__weekday">{{ group.weekday }}</span>
+          <span class="schedule-day__num">{{ group.day_num }}</span>
+          {% if group.month %}<span class="schedule-day__month">{{ group.month }}</span>{% endif %}
+        </div>
+        <div class="schedule-day__grid">
+          {% for film in group.films %}
+          <a
+            class="schedule-poster"
+            href="{% if film.media == 'tv' %}{{ url_for('search_movie', query=film.title) }}{% else %}{{ url_for('film_page', imdb_id=film.id) }}{% endif %}"
+            title="{{ film.title }}"
+          >
+            <div class="schedule-poster__art">
+              <img src="{{ film.poster }}" alt="{{ film.title }}" loading="lazy">
+            </div>
+            <h3 class="schedule-poster__title">{{ film.title }}</h3>
+            <p class="schedule-poster__meta">
+              {% if film.media == 'tv' %}New Show{% else %}{{ film.platform_label }}{% endif %}{% if film.year %} · {{ film.year }}{% endif %}
+            </p>
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">Nothing in this schedule lane yet. Try another filter.</div>
+    {% endif %}
 
-<section class="band" id="ott-upcoming">
-  <div class="band-head">
-    <h2>Coming to streaming / OTT</h2>
-    <span class="text-muted" style="font-family:var(--font-ui);font-size:0.78rem;">Digital release window</span>
-  </div>
-  {% if ott_upcoming %}
-  <div class="schedule-grid">
-    {% for film in ott_upcoming %}
-    <a class="schedule-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
-      <div class="poster-tile">
-        <img src="{{ film.poster }}" alt="{{ film.title }}">
+    {% else %}
+    <div class="schedule-toolbar">
+      <div class="schedule-pills" role="group" aria-label="Media type">
+        <a class="schedule-pill" href="{{ url_for('schedule', status='released', media='movies', platform='theaters') }}">All</a>
+        <a class="schedule-pill" href="{{ url_for('schedule', status='released', media='movies', platform='theaters') }}">Movies</a>
+        <a class="schedule-pill" href="{{ url_for('schedule', status='released', media='shows', platform='ott') }}">Shows</a>
+        <a class="schedule-pill is-active" href="{{ url_for('schedule', status='languages') }}">Languages</a>
       </div>
-      <div class="schedule-card__body">
-        <span class="schedule-badge schedule-badge--ott">OTT / Digital</span>
-        <h3>{{ film.title }}</h3>
-        <p class="schedule-card__date">{{ film.release_label }}</p>
-        <p class="schedule-card__hint">Open the film page → Watch for platforms</p>
+    </div>
+    <div class="band-head" style="margin:0 0 1rem;">
+      <h2>Watch by language</h2>
+      <span class="text-muted" style="font-family:var(--font-body);font-size:0.78rem;">Pick a language</span>
+    </div>
+    <div class="lang-groups">
+      {% for group in language_groups %}
+      <div class="lang-group{% if group.flag == 'IN' %} lang-group--featured{% endif %}">
+        <h3 class="lang-group__country">{{ group.country }} <span>{{ group.flag }}</span></h3>
+        <div class="lang-chips schedule-pills">
+          {% for code, name in group.languages %}
+          <a
+            class="schedule-pill"
+            href="{{ url_for('schedule', status='languages', lang=code, kind='theatrical') }}"
+          >{{ name }}</a>
+          {% endfor %}
+        </div>
       </div>
-    </a>
-    {% endfor %}
+      {% endfor %}
+    </div>
+    {% endif %}
   </div>
-  {% else %}
-  <div class="empty-state">No upcoming digital releases found.</div>
-  {% endif %}
-</section>
-
-<section class="band" id="ott-recent">
-  <div class="band-head">
-    <h2>Recently arrived on OTT</h2>
-  </div>
-  {% if ott_recent %}
-  <div class="schedule-grid">
-    {% for film in ott_recent %}
-    <a class="schedule-card" href="{{ url_for('film_page', imdb_id=film.id) }}">
-      <div class="poster-tile">
-        <img src="{{ film.poster }}" alt="{{ film.title }}">
-      </div>
-      <div class="schedule-card__body">
-        <span class="schedule-badge schedule-badge--ott">New on digital</span>
-        <h3>{{ film.title }}</h3>
-        <p class="schedule-card__date">{{ film.release_label }}</p>
-        <p class="schedule-card__hint">Open the film page → Watch for platforms</p>
-      </div>
-    </a>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="empty-state">No recent digital arrivals found.</div>
-  {% endif %}
-</section>
+</div>
+{% endif %}
 
 {% elif view == "profile" %}
 <div class="profile-banner">
@@ -897,17 +1062,42 @@
   <div class="empty-state">No liked films yet.</div>
   {% endif %}
 {% elif tab == 'diary' %}
-  {% if diary_entries %}
-  <div class="poster-grid mt-3">
-    {% for entry in diary_entries %}
-    <div class="poster-card">
-      <a class="poster-tile" href="{% if entry.imdb_id %}{{ url_for('film_page', imdb_id=entry.imdb_id) }}{% else %}{{ url_for('film_by_title', title=entry.title) }}{% endif %}">
-        <img src="{{ entry.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ entry.title }}">
-      </a>
-      <h5>{{ entry.title }}</h5>
-      {% if entry.rating %}<div class="meta"><span class="stars-display" data-rating="{{ entry.rating }}" style="--fill: {{ (entry.rating / 10 * 100)|round }}%"></span></div>{% endif %}
-      <p class="byline">{{ entry.watched_date.strftime('%b %d, %Y') }}</p>
-    </div>
+  {% if diary_months %}
+  <div class="diary-months diary-months--profile mt-3">
+    {% for month in diary_months %}
+    <section class="diary-month">
+      <div class="diary-month__bar">
+        <h2 class="diary-month__label">{{ month.label }}</h2>
+      </div>
+      <div class="diary-rail">
+        {% for entry in month.entries %}
+        <article class="diary-card">
+          {% if current_user.is_authenticated and current_user.id == user.id %}
+          <details class="diary-card__menu">
+            <summary aria-label="Entry options">⋮</summary>
+            <div class="diary-card__dropdown">
+              <a href="{{ url_for('edit_diary', entry_id=entry.id) }}">Edit</a>
+              <form action="{{ url_for('delete_diary', entry_id=entry.id) }}" method="POST" onsubmit="return confirm('Delete this diary entry?');">
+                <button type="submit">Delete</button>
+              </form>
+            </div>
+          </details>
+          {% endif %}
+          <a class="diary-card__link" href="{% if entry.imdb_id %}{{ url_for('film_page', imdb_id=entry.imdb_id) }}{% else %}{{ url_for('film_by_title', title=entry.title) }}{% endif %}">
+            <img class="diary-card__img" src="{{ entry.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ entry.title }}" loading="lazy">
+            <span class="diary-card__shade" aria-hidden="true"></span>
+            <span class="diary-card__meta">
+              <span class="diary-card__title">{{ entry.title }}</span>
+              {% if entry.rating %}
+              <span class="stars-display diary-card__stars" data-rating="{{ entry.rating }}" style="--fill: {{ (entry.rating / 10 * 100)|round }}%"></span>
+              {% endif %}
+              <span class="diary-card__date">{{ entry.watched_date.strftime('%b %d, %Y') }}</span>
+            </span>
+          </a>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
     {% endfor %}
   </div>
   {% else %}
@@ -1073,152 +1263,358 @@
 {% endif %}
 
 {% elif view == "diary" %}
-<div class="page-head">
-  <div>
+<div class="diary-page">
+  <header class="diary-page__head">
     <h1>Diary</h1>
-    <p class="lede">A private log of nights at the movies.</p>
-  </div>
-  <a href="{{ url_for('add_diary') }}" class="btn btn-primary">Add Entry</a>
-</div>
+    <p class="diary-page__lede">A private log of nights at the movies.</p>
+  </header>
 
-{% if entries %}
-<div class="poster-grid">
-  {% for entry in entries %}
-  <div class="poster-card">
-    <a class="poster-tile" href="{% if entry.imdb_id %}{{ url_for('film_page', imdb_id=entry.imdb_id) }}{% else %}{{ url_for('film_by_title', title=entry.title) }}{% endif %}">
-      <img src="{{ entry.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ entry.title }}">
-    </a>
-    <h5>{{ entry.title }}</h5>
-    {% if entry.rating %}
-    <div class="meta">
-      <span class="stars-display" data-rating="{{ entry.rating }}" style="--fill: {{ (entry.rating / 10 * 100)|round }}%"></span>
-      {% if entry.is_rewatch %} · rewatch{% endif %}
-    </div>
-    {% endif %}
-    <p class="byline" style="margin:0.35rem 0;">{{ entry.watched_date.strftime('%b %d, %Y') }}</p>
-    {% if entry.review %}
-      <p class="body-text" style="font-size:0.9rem;">{{ entry.review }}</p>
-    {% endif %}
-    <div class="review-actions justify-content-center">
-      <a href="{{ url_for('edit_diary', entry_id=entry.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
-      <form action="{{ url_for('delete_diary', entry_id=entry.id) }}" method="POST" onsubmit="return confirm('Delete this diary entry?');">
-        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-      </form>
-    </div>
+  {% if diary_months %}
+  <div class="diary-months">
+    {% for month in diary_months %}
+    <section class="diary-month">
+      <div class="diary-month__bar">
+        <h2 class="diary-month__label">{{ month.label }}</h2>
+      </div>
+      <div class="diary-rail">
+        {% for entry in month.entries %}
+        <article class="diary-card">
+          <details class="diary-card__menu">
+            <summary aria-label="Entry options">⋮</summary>
+            <div class="diary-card__dropdown">
+              <a href="{{ url_for('edit_diary', entry_id=entry.id) }}">Edit</a>
+              <form action="{{ url_for('delete_diary', entry_id=entry.id) }}" method="POST" onsubmit="return confirm('Delete this diary entry?');">
+                <button type="submit">Delete</button>
+              </form>
+            </div>
+          </details>
+          <a class="diary-card__link" href="{% if entry.imdb_id %}{{ url_for('film_page', imdb_id=entry.imdb_id) }}{% else %}{{ url_for('film_by_title', title=entry.title) }}{% endif %}">
+            <img class="diary-card__img" src="{{ entry.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ entry.title }}" loading="lazy">
+            <span class="diary-card__shade" aria-hidden="true"></span>
+            <span class="diary-card__meta">
+              <span class="diary-card__title">{{ entry.title }}</span>
+              {% if entry.rating %}
+              <span class="stars-display diary-card__stars" data-rating="{{ entry.rating }}" style="--fill: {{ (entry.rating / 10 * 100)|round }}%"></span>
+              {% endif %}
+              <span class="diary-card__date">{{ entry.watched_date.strftime('%b %d, %Y') }}</span>
+            </span>
+          </a>
+        </article>
+        {% endfor %}
+      </div>
+    </section>
+    {% endfor %}
   </div>
-  {% endfor %}
+  {% else %}
+  <div class="empty-state">No diary entries yet. Search a film and hit Log.</div>
+  {% endif %}
+
+  <a href="{{ url_for('add_diary') }}" class="diary-fab" aria-label="Add diary entry">+</a>
 </div>
-{% else %}
-<div class="empty-state">No diary entries yet. Search a film and hit Log.</div>
-{% endif %}
 
 {% elif view == "lists" %}
-<div class="page-head">
-  <div>
-    <h1>Lists</h1>
-    <p class="lede">Curated shelves from your collection.</p>
-  </div>
-  <a href="{{ url_for('create_list') }}" class="btn btn-primary">Create List</a>
-</div>
-
-{% if lists %}
-  {% for lst in lists %}
-  <div class="list-row">
+<div class="stack-gallery">
+  <div class="page-head stack-gallery__head">
     <div>
-      <h5>{{ lst.name }}</h5>
-      <p class="mb-0 text-muted">{{ lst.description }}</p>
+      <h1>Stacks</h1>
+      <p class="lede">Public collections from the community.</p>
     </div>
-    <div class="actions">
-      <a href="{{ url_for('view_list', list_id=lst.id) }}" class="btn btn-sm btn-outline-secondary">View</a>
-      <a href="{{ url_for('edit_list', list_id=lst.id) }}" class="btn btn-sm btn-outline-secondary">Edit</a>
-      <form action="{{ url_for('delete_list', list_id=lst.id) }}" method="POST" onsubmit="return confirm('Delete this list?');">
-        <button type="submit" class="btn btn-sm btn-outline-danger">Delete</button>
-      </form>
-    </div>
+    {% if current_user.is_authenticated %}
+    <a href="{{ url_for('create_list') }}" class="btn btn-primary">New Stack</a>
+    {% else %}
+    <a href="{{ url_for('signup') }}" class="btn btn-primary">Start a stack</a>
+    {% endif %}
   </div>
-  {% endfor %}
-{% else %}
-<div class="empty-state">You haven’t created any lists yet.</div>
-{% endif %}
+
+  {% if public_cards %}
+  <div class="stack-gallery__grid">
+    {% for card in public_cards %}
+    <a class="stack-card" href="{{ url_for('view_list', list_id=card.id) }}">
+      <div class="stack-card__banner">
+        <img src="{{ card.banner }}" alt="">
+      </div>
+      <h2 class="stack-card__title">{{ card.name }}</h2>
+      <div class="stack-card__meta">
+        <img
+          class="stack-card__avatar"
+          src="{{ url_for('static', filename='profile_pics/' + card.owner_pic) }}"
+          alt=""
+        >
+        <span>{{ card.item_count }} Item{% if card.item_count != 1 %}s{% endif %}</span>
+        <span class="stack-card__dot">·</span>
+        <span>{{ card.like_count }} like{% if card.like_count != 1 %}s{% endif %}</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No public stacks yet. Create one and set it to public.</div>
+  {% endif %}
+
+  {% if current_user.is_authenticated %}
+  <section class="stack-gallery__mine">
+    <div class="stack-gallery__section-head">
+      <h2>Your stacks</h2>
+    </div>
+    {% if my_cards %}
+    <div class="stack-gallery__grid">
+      {% for card in my_cards %}
+      <a class="stack-card" href="{{ url_for('view_list', list_id=card.id) }}">
+        <div class="stack-card__banner">
+          <img src="{{ card.banner }}" alt="">
+          {% if not card.is_public %}<span class="stack-card__badge">Private</span>{% endif %}
+        </div>
+        <h2 class="stack-card__title">{{ card.name }}</h2>
+        <div class="stack-card__meta">
+          <img
+            class="stack-card__avatar"
+            src="{{ url_for('static', filename='profile_pics/' + card.owner_pic) }}"
+            alt=""
+          >
+          <span>{{ card.item_count }} Item{% if card.item_count != 1 %}s{% endif %}</span>
+          <span class="stack-card__dot">·</span>
+          <span>{{ card.like_count }} like{% if card.like_count != 1 %}s{% endif %}</span>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">You haven’t created any stacks yet.</div>
+    {% endif %}
+  </section>
+  {% endif %}
+</div>
 
 {% elif view == "view_list" %}
-<div class="page-head">
-  <div>
-    <h1>{{ movie_list.name }}</h1>
-    <p class="lede">{{ movie_list.description or "No description" }}</p>
+<article class="stack-page" data-list-id="{{ movie_list.id }}">
+  <div class="stack-banner">
+    <img class="stack-banner__img" src="{{ stack_banner }}" alt="">
+    {% if is_owner %}
+    <form class="stack-banner__upload" method="POST" action="{{ url_for('upload_stack_banner', list_id=movie_list.id) }}" enctype="multipart/form-data">
+      <label class="stack-banner__upload-btn">
+        Change banner
+        <input type="file" name="banner" accept="image/png,image/jpeg,image/gif,image/webp" onchange="this.form.submit()">
+      </label>
+    </form>
+    {% endif %}
   </div>
-  <a href="{{ url_for('lists') }}" class="btn btn-secondary">Back to Lists</a>
-</div>
 
-<div class="form-panel form-panel--narrow mb-4">
-  <h3 style="font-size:1.25rem;margin-bottom:1rem;">Add a Movie</h3>
-  <form method="POST" action="{{ url_for('add_movie_to_list', list_id=movie_list.id) }}">
-    <div class="mb-3 position-relative">
-      <label for="movie-search" class="form-label">Search Movie</label>
-      <input type="text" name="title" id="movie-search" class="form-control" placeholder="Start typing..." autocomplete="off">
-      <div id="suggestions" class="search-dropdown"></div>
-    </div>
-    <input type="hidden" name="poster_url" id="poster-url">
-    <button type="submit" class="btn btn-primary">Add Movie</button>
-  </form>
-</div>
-
-<h2 class="mb-3">In This List</h2>
-{% if movie_list.movies %}
-<div class="poster-grid">
-  {% for movie in movie_list.movies %}
-  <div class="poster-card">
-    <div class="poster-tile">
-      <img src="{{ movie.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.title }}">
-    </div>
-    <h6>{{ movie.title }}</h6>
+  <h1 class="stack-page__title">{{ movie_list.name }}</h1>
+  {% if is_owner %}
+  <div class="stack-page__visibility">
+    <span class="stack-vis-pill{% if movie_list.is_public %} is-public{% endif %}">
+      {{ 'Public' if movie_list.is_public else 'Private' }}
+    </span>
+    <form method="POST" action="{{ url_for('toggle_stack_visibility', list_id=movie_list.id) }}">
+      <button type="submit" class="btn btn-sm btn-outline-secondary">
+        {{ 'Make private' if movie_list.is_public else 'Make public' }}
+      </button>
+    </form>
   </div>
-  {% endfor %}
-</div>
-{% else %}
-<div class="empty-state">No movies in this list yet.</div>
-{% endif %}
+  {% endif %}
+
+  <div class="stack-page__actions">
+    <a class="stack-page__author" href="{% if stack_owner %}{{ url_for('user_profile', username=stack_owner.username) }}{% else %}#{% endif %}">
+      <img
+        class="stack-page__avatar"
+        src="{{ url_for('static', filename='profile_pics/' + (stack_owner.profile_pic if stack_owner and stack_owner.profile_pic else 'default.jpg')) }}"
+        alt="{{ stack_owner.username if stack_owner else 'Owner' }}"
+      >
+      <span>{{ stack_owner.username if stack_owner else 'Unknown' }}</span>
+    </a>
+
+    <div class="stack-page__action-btns">
+      {% if current_user.is_authenticated %}
+      <form method="POST" action="{{ url_for('like_stack', list_id=movie_list.id) }}" class="stack-like-form" id="stack-like-form">
+        <button type="submit" class="stack-action-btn{% if user_liked %} is-active{% endif %}" id="stack-like-btn" aria-label="Like stack" title="Like">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="{% if user_liked %}currentColor{% else %}none{% endif %}" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          <span id="stack-like-count">{{ like_count }}</span>
+        </button>
+      </form>
+      {% else %}
+      <a class="stack-action-btn" href="{{ url_for('login') }}" title="Log in to like">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span>{{ like_count }}</span>
+      </a>
+      {% endif %}
+
+      <button type="button" class="stack-action-btn" id="stack-comment-toggle" aria-controls="stack-comments" aria-expanded="false" title="Comments">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>{{ comment_count }}</span>
+      </button>
+
+      <button type="button" class="stack-action-btn" id="stack-share-btn" title="Share" data-share-url="{{ request.url }}">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        <span>Share</span>
+      </button>
+    </div>
+  </div>
+
+  {% if movie_list.description %}
+  <p class="stack-page__desc">{{ movie_list.description }}</p>
+  {% endif %}
+  <p class="stack-page__meta">{{ stack_movies|length }} item{% if stack_movies|length != 1 %}s{% endif %} · {{ updated_label }}</p>
+
+  <div class="stack-grid" id="stack-film-grid">
+    {% for movie in stack_movies %}
+    <article class="stack-grid__card" data-movie-id="{{ movie.id }}" {% if is_owner %}draggable="true"{% endif %}>
+      {% if movie.imdb_id %}
+      <a class="stack-grid__poster" href="{{ url_for('film_page', imdb_id=movie.imdb_id) }}">
+        <img src="{{ movie.poster_url or 'https://via.placeholder.com/300x450?text=?' }}" alt="{{ movie.title }}">
+      </a>
+      {% else %}
+      <div class="stack-grid__poster">
+        <img src="{{ movie.poster_url or 'https://via.placeholder.com/300x450?text=?' }}" alt="{{ movie.title }}">
+      </div>
+      {% endif %}
+      <h3 class="stack-grid__title">
+        {% if movie.imdb_id %}
+        <a href="{{ url_for('film_page', imdb_id=movie.imdb_id) }}">{{ movie.title }}</a>
+        {% else %}
+        {{ movie.title }}
+        {% endif %}
+      </h3>
+      <p class="stack-grid__meta">Movie{% if movie.year %} · {{ movie.year }}{% endif %}</p>
+      {% if is_owner %}
+      <div class="stack-grid__owner">
+        <form method="POST" action="{{ url_for('remove_movie_from_list', list_id=movie_list.id, movie_id=movie.id) }}" onsubmit="return confirm('Remove this film from the stack?');">
+          <button type="submit" class="stack-icon-btn" aria-label="Remove" title="Remove">×</button>
+        </form>
+      </div>
+      {% endif %}
+    </article>
+    {% else %}
+    <div class="empty-state stack-grid__empty">No films yet.{% if is_owner %} Open Edit stack and add as many as you want.{% endif %}</div>
+    {% endfor %}
+  </div>
+
+  <section class="stack-comments" id="stack-comments" hidden>
+    <h2 class="stack-comments__title">Comments</h2>
+    {% if current_user.is_authenticated %}
+    <form class="stack-comments__form" method="POST" action="{{ url_for('add_stack_comment', list_id=movie_list.id) }}">
+      <textarea class="form-control" name="text" rows="3" placeholder="Share your opinion on this stack..." required maxlength="2000"></textarea>
+      <button type="submit" class="btn btn-primary">Post comment</button>
+    </form>
+    {% else %}
+    <p class="stack-comments__login"><a href="{{ url_for('login') }}">Log in</a> to leave a comment.</p>
+    {% endif %}
+
+    <div class="stack-comments__list">
+      {% for c in stack_comments %}
+      <article class="stack-comment">
+        <img
+          class="stack-comment__avatar"
+          src="{{ url_for('static', filename='profile_pics/' + (c.author.profile_pic if c.author and c.author.profile_pic else 'default.jpg')) }}"
+          alt=""
+        >
+        <div>
+          <header class="stack-comment__head">
+            <strong>{{ c.author.username if c.author else 'User' }}</strong>
+            <time>{{ c.created_at.strftime('%b %d, %Y') if c.created_at else '' }}</time>
+          </header>
+          <p class="stack-comment__text">{{ c.text }}</p>
+        </div>
+      </article>
+      {% else %}
+      <p class="stack-comments__empty">No comments yet. Be the first.</p>
+      {% endfor %}
+    </div>
+  </section>
+
+  {% if is_owner %}
+  <details class="stack-owner-tools"{% if not stack_movies %} open{% endif %}>
+    <summary>Edit stack</summary>
+    <form class="stack-editor__meta form-panel" method="POST" action="{{ url_for('edit_list', list_id=movie_list.id) }}">
+      <div class="stack-editor__meta-grid">
+        <div>
+          <label class="form-label" for="stack-name">Name</label>
+          <input type="text" class="form-control" id="stack-name" name="name" value="{{ movie_list.name }}" required>
+        </div>
+        <div>
+          <label class="form-label" for="stack-description">Description</label>
+          <textarea class="form-control" id="stack-description" name="description" rows="4">{{ movie_list.description or '' }}</textarea>
+        </div>
+      </div>
+      <label class="stack-public-toggle">
+        <input type="checkbox" name="is_public" value="1"{% if movie_list.is_public %} checked{% endif %}>
+        <span>Make this stack public</span>
+      </label>
+      <div class="stack-editor__meta-actions">
+        <a href="{{ url_for('lists') }}" class="btn btn-secondary">Your stacks</a>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+
+    <div class="stack-add-panel">
+      <div class="stack-add-bar">
+        <span class="stack-add-bar__label">Add films</span>
+        <div class="stack-add-bar__search">
+          <input type="text" id="movie-search" class="form-control" placeholder="Search and pick as many as you want..." autocomplete="off">
+          <div id="suggestions" class="search-dropdown stack-suggestions"></div>
+        </div>
+      </div>
+      <div class="stack-pending" id="stack-pending" hidden>
+        <div class="stack-pending__head">
+          <span id="stack-pending-count">0 selected</span>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="stack-pending-clear">Clear</button>
+        </div>
+        <div class="stack-pending__list" id="stack-pending-list"></div>
+        <button type="button" class="btn btn-primary" id="stack-pending-submit">Add to stack</button>
+      </div>
+      <p class="stack-owner-tools__hint">Click search results to queue films, then add them all at once. Drag posters above to reorder.</p>
+    </div>
+  </details>
+  {% endif %}
+</article>
 
 {% elif view == "create_list" %}
 <div class="page-head">
   <div>
-    <h1>Create List</h1>
-    <p class="lede">Start a new curated shelf.</p>
+    <h1>New Stack</h1>
+    <p class="lede">Name it, then add films by search.</p>
   </div>
 </div>
 
 <div class="form-panel form-panel--narrow">
   <form method="POST">
     <div class="mb-3">
-      <label for="name" class="form-label">List Name</label>
-      <input type="text" name="name" id="name" class="form-control" required>
+      <label for="name" class="form-label">Name</label>
+      <input type="text" name="name" id="name" class="form-control" required placeholder="eg. Comfort watches">
     </div>
     <div class="mb-3">
       <label for="description" class="form-label">Description</label>
-      <textarea name="description" id="description" class="form-control" rows="3"></textarea>
+      <textarea name="description" id="description" class="form-control" rows="3" placeholder="What belongs in this pile?"></textarea>
     </div>
-    <button type="submit" class="btn btn-primary">Create List</button>
+    <label class="stack-public-toggle mb-3">
+      <input type="checkbox" name="is_public" value="1">
+      <span>Make this stack public</span>
+    </label>
+    <button type="submit" class="btn btn-primary">Create &amp; add films</button>
   </form>
 </div>
 
 {% elif view == "edit_list" %}
 <div class="page-head">
   <div>
-    <h1>Edit List</h1>
-    <p class="lede">Rename or redescribe this shelf.</p>
+    <h1>Edit Stack</h1>
+    <p class="lede">Rename or redescribe this pile.</p>
   </div>
 </div>
 
 <div class="form-panel form-panel--narrow">
   <form method="POST">
     <div class="mb-3">
-      <label class="form-label">List Name</label>
+      <label class="form-label">Name</label>
       <input type="text" name="name" class="form-control" value="{{ movie_list.name }}" required>
     </div>
     <div class="mb-3">
       <label class="form-label">Description</label>
       <textarea name="description" class="form-control" rows="3">{{ movie_list.description }}</textarea>
     </div>
+    <label class="stack-public-toggle mb-3">
+      <input type="checkbox" name="is_public" value="1"{% if movie_list.is_public %} checked{% endif %}>
+      <span>Make this stack public</span>
+    </label>
     <button type="submit" class="btn btn-primary">Save Changes</button>
   </form>
 </div>
@@ -1406,7 +1802,7 @@
     </div>
     <div class="mb-3 form-check">
       <input class="form-check-input" type="checkbox" value="1" id="is_rewatch" name="is_rewatch">
-      <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-ui);color:var(--cream-muted);">Rewatch</label>
+      <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-body);color:var(--cream-muted);">Rewatch</label>
     </div>
     <div class="mb-3">
       <label for="review" class="form-label">Your Thoughts</label>
@@ -1482,7 +1878,7 @@
     </div>
     <div class="mb-3 form-check">
       <input class="form-check-input" type="checkbox" value="1" id="is_rewatch" name="is_rewatch" {% if entry.is_rewatch %}checked{% endif %}>
-      <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-ui);color:var(--cream-muted);">Rewatch</label>
+      <label class="form-check-label" for="is_rewatch" style="font-family:var(--font-body);color:var(--cream-muted);">Rewatch</label>
     </div>
     <div class="mb-3">
       <label for="review" class="form-label">Your Thoughts</label>
@@ -1512,7 +1908,91 @@
     document.getElementById("navToggle")?.addEventListener("click", function () {
       document.getElementById("siteNav")?.classList.toggle("is-open");
     });
+
+    (function () {
+      const bar = document.querySelector('[data-quote-bar]');
+      if (!bar) return;
+      const quotes = Array.from(bar.querySelectorAll('[data-quote]'));
+      const dots = Array.from(bar.querySelectorAll('[data-quote-dot]'));
+      if (!quotes.length || quotes.length !== dots.length) return;
+      let index = 0;
+      const show = (next) => {
+        index = (next + quotes.length) % quotes.length;
+        quotes.forEach((q, i) => {
+          const on = i === index;
+          q.hidden = !on;
+          q.classList.toggle('is-active', on);
+          dots[i].classList.toggle('is-active', on);
+        });
+      };
+      dots.forEach((dot, i) => dot.addEventListener('click', () => show(i)));
+      setInterval(() => show(index + 1), 7000);
+    })();
+
+    (function () {
+      const root = document.documentElement;
+      const key = 'theme';
+      const saved = localStorage.getItem(key);
+      const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+      const initial = saved || (prefersLight ? 'light' : 'dark');
+      root.dataset.theme = initial;
+
+      const btn = document.getElementById('themeToggle');
+      if (!btn) return;
+
+      function updateLabel() {
+        btn.dataset.theme = root.dataset.theme;
+        btn.textContent = root.dataset.theme === 'light' ? 'Light' : 'Dark';
+      }
+
+      btn.addEventListener('click', function () {
+        root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
+        localStorage.setItem(key, root.dataset.theme);
+        updateLabel();
+      });
+
+      updateLabel();
+    })();
   </script>
+{% if view == "schedule" %}
+<script>
+(function () {
+  const langFilters = document.querySelectorAll('.lang-kind-filter');
+  const langPanels = document.querySelectorAll('.lang-kind-panel');
+  if (!langFilters.length) return;
+
+  function showLangKind(kind) {
+    langFilters.forEach((btn) => {
+      const on = btn.dataset.langKind === kind;
+      btn.classList.toggle('is-active', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+      const check = btn.querySelector('.schedule-pill__check');
+      if (check) check.remove();
+      if (on) {
+        const mark = document.createElement('span');
+        mark.className = 'schedule-pill__check';
+        mark.setAttribute('aria-hidden', 'true');
+        mark.textContent = '✓';
+        btn.prepend(mark);
+      }
+    });
+    langPanels.forEach((panel) => {
+      panel.classList.toggle('is-hidden', panel.dataset.langPanel !== kind);
+    });
+    const url = new URL(window.location.href);
+    url.searchParams.set('kind', kind);
+    window.history.replaceState({}, '', url);
+  }
+
+  langFilters.forEach((btn) => {
+    btn.addEventListener('click', () => showLangKind(btn.dataset.langKind));
+  });
+})();
+</script>
+{% endif %}
+{% if view == "home" %}
+{# Home trending slider is CSS-only; no JS required. #}
+{% endif %}
 {% if view == "dashboard" %}
 <script>
 document.getElementById('search-input').addEventListener('input', function () {
@@ -1592,41 +2072,233 @@ document.querySelectorAll('.fav-clear').forEach((btn) => {
 {% endif %}
 {% if view == "view_list" %}
 <script>
-document.getElementById('movie-search').addEventListener('input', function () {
-    const query = this.value;
-    const resultsBox = document.getElementById('suggestions');
-    if (query.length < 2) {
+(function () {
+  const page = document.querySelector('.stack-page');
+  const listId = page && page.dataset.listId;
+
+  const commentToggle = document.getElementById('stack-comment-toggle');
+  const comments = document.getElementById('stack-comments');
+  if (commentToggle && comments) {
+    const openFromHash = location.hash === '#stack-comments';
+    if (openFromHash) {
+      comments.hidden = false;
+      commentToggle.setAttribute('aria-expanded', 'true');
+    }
+    commentToggle.addEventListener('click', () => {
+      const open = comments.hidden;
+      comments.hidden = !open;
+      commentToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      if (open) comments.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  const shareBtn = document.getElementById('stack-share-btn');
+  if (shareBtn) {
+    shareBtn.addEventListener('click', async () => {
+      const url = shareBtn.dataset.shareUrl || window.location.href;
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: document.title, url });
+        } else if (navigator.clipboard) {
+          await navigator.clipboard.writeText(url);
+          shareBtn.classList.add('is-copied');
+          const label = shareBtn.querySelector('span');
+          if (label) label.textContent = 'Copied';
+          setTimeout(() => {
+            shareBtn.classList.remove('is-copied');
+            if (label) label.textContent = 'Share';
+          }, 1600);
+        }
+      } catch (_) {}
+    });
+  }
+
+  const likeForm = document.getElementById('stack-like-form');
+  if (likeForm) {
+    likeForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      fetch(likeForm.action, {
+        method: 'POST',
+        headers: { 'X-Requested-With': 'fetch', Accept: 'application/json' },
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (!data || !data.ok) return;
+          const btn = document.getElementById('stack-like-btn');
+          const count = document.getElementById('stack-like-count');
+          if (count) count.textContent = data.count;
+          if (btn) {
+            btn.classList.toggle('is-active', !!data.liked);
+            const svg = btn.querySelector('svg');
+            if (svg) svg.setAttribute('fill', data.liked ? 'currentColor' : 'none');
+          }
+        })
+        .catch(() => likeForm.submit());
+    });
+  }
+
+  const search = document.getElementById('movie-search');
+  const resultsBox = document.getElementById('suggestions');
+  const pendingWrap = document.getElementById('stack-pending');
+  const pendingList = document.getElementById('stack-pending-list');
+  const pendingCount = document.getElementById('stack-pending-count');
+  const pendingClear = document.getElementById('stack-pending-clear');
+  const pendingSubmit = document.getElementById('stack-pending-submit');
+  const pending = [];
+
+  function esc(s) {
+    return String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function filmKey(film) {
+    return (film.imdb_id || ('t:' + (film.title || '').toLowerCase()));
+  }
+
+  function renderPending() {
+    if (!pendingWrap || !pendingList || !pendingCount || !pendingSubmit) return;
+    pendingWrap.hidden = pending.length === 0;
+    pendingCount.textContent = pending.length + ' selected';
+    pendingSubmit.textContent = pending.length === 1
+      ? 'Add 1 film'
+      : 'Add ' + pending.length + ' films';
+    pendingList.innerHTML = pending.map((film, idx) => {
+      const poster = film.poster_url || 'https://via.placeholder.com/40x60?text=?';
+      return `
+        <div class="stack-pending__chip" data-idx="${idx}">
+          <img src="${esc(poster)}" alt="">
+          <span>${esc(film.title)}${film.year ? ' (' + esc(film.year) + ')' : ''}</span>
+          <button type="button" class="stack-pending__remove" data-remove="${idx}" aria-label="Remove">×</button>
+        </div>`;
+    }).join('');
+  }
+
+  function queueFilm(title, poster, year, imdb) {
+    const film = {
+      title: title,
+      poster_url: poster || '',
+      year: year || '',
+      imdb_id: imdb || '',
+    };
+    const key = filmKey(film);
+    if (pending.some((f) => filmKey(f) === key)) return;
+    pending.push(film);
+    renderPending();
+    if (search) search.value = '';
+    if (resultsBox) resultsBox.innerHTML = '';
+  }
+
+  window.selectStackMovie = queueFilm;
+
+  if (pendingList) {
+    pendingList.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-remove]');
+      if (!btn) return;
+      const idx = Number(btn.dataset.remove);
+      if (Number.isNaN(idx)) return;
+      pending.splice(idx, 1);
+      renderPending();
+    });
+  }
+
+  if (pendingClear) {
+    pendingClear.addEventListener('click', () => {
+      pending.length = 0;
+      renderPending();
+    });
+  }
+
+  if (pendingSubmit && listId) {
+    pendingSubmit.addEventListener('click', () => {
+      if (!pending.length) return;
+      pendingSubmit.disabled = true;
+      pendingSubmit.textContent = 'Adding…';
+      fetch('/lists/' + listId + '/add_movie', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Requested-With': 'fetch',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ movies: pending }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data && data.ok) {
+            window.location.reload();
+            return;
+          }
+          pendingSubmit.disabled = false;
+          renderPending();
+          alert((data && data.error) || 'Could not add films.');
+        })
+        .catch(() => {
+          pendingSubmit.disabled = false;
+          renderPending();
+          alert('Could not add films.');
+        });
+    });
+  }
+
+  if (search && resultsBox) {
+    search.addEventListener('input', function () {
+      const query = this.value;
+      if (query.length < 2) {
         resultsBox.innerHTML = '';
         return;
-    }
-
-    fetch(`/search_preview?query=${encodeURIComponent(query)}`)
-        .then(response => response.json())
-        .then(data => {
-            let html = '';
-            data.forEach(movie => {
-                const poster = movie.Poster && movie.Poster !== 'N/A'
-                    ? movie.Poster
-                    : 'https://via.placeholder.com/40x60?text=?';
-                const safeTitle = movie.Title.replace(/'/g, "\\'");
-                const safePoster = (movie.Poster || '').replace(/'/g, "\\'");
-                html += `
-                    <button type="button" class="search-result" style="width:100%;border:none;background:transparent;text-align:left;"
-                      onclick="selectMovie('${safeTitle}', '${safePoster}')">
-                        <img src="${poster}" alt="">
-                        ${movie.Title} (${movie.Year})
-                    </button>
-                `;
-            });
-            resultsBox.innerHTML = html;
+      }
+      fetch('/search_preview?query=' + encodeURIComponent(query))
+        .then((r) => r.json())
+        .then((data) => {
+          resultsBox.innerHTML = data.map((movie) => {
+            const poster = movie.Poster && movie.Poster !== 'N/A'
+              ? movie.Poster
+              : 'https://via.placeholder.com/40x60?text=?';
+            return `
+              <button type="button" class="search-result" style="width:100%;border:none;background:transparent;text-align:left;"
+                onclick='selectStackMovie(${JSON.stringify(movie.Title)}, ${JSON.stringify(poster)}, ${JSON.stringify(movie.Year || '')}, ${JSON.stringify(movie.imdbID || '')})'>
+                <img src="${esc(poster)}" alt="">
+                <span>${esc(movie.Title)} (${esc(movie.Year || '—')})</span>
+              </button>`;
+          }).join('');
         });
-});
+    });
+  }
 
-function selectMovie(title, poster) {
-    document.getElementById('movie-search').value = title;
-    document.getElementById('poster-url').value = poster;
-    document.getElementById('suggestions').innerHTML = '';
-}
+  const grid = document.getElementById('stack-film-grid');
+  if (!grid || !listId) return;
+  const cards = grid.querySelectorAll('.stack-grid__card[draggable="true"]');
+  if (!cards.length) return;
+
+  let dragEl = null;
+  cards.forEach((card) => {
+    card.addEventListener('dragstart', () => {
+      dragEl = card;
+      card.classList.add('is-dragging');
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('is-dragging');
+      dragEl = null;
+      const order = Array.from(grid.querySelectorAll('.stack-grid__card')).map((r) => r.dataset.movieId);
+      fetch('/lists/' + listId + '/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order }),
+      });
+    });
+    card.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const over = e.currentTarget;
+      if (!dragEl || dragEl === over) return;
+      const rect = over.getBoundingClientRect();
+      const before = e.clientX < rect.left + rect.width / 2;
+      grid.insertBefore(dragEl, before ? over : over.nextSibling);
+    });
+  });
+})();
 </script>
 {% endif %}
 </body>

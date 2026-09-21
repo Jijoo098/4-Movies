@@ -1,88 +1,293 @@
+{% macro films_clapper_icon(extra_class='') %}
+<svg class="films-clapper-icon{{ ' ' ~ extra_class if extra_class else '' }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 9.5 18.5 5.5 20.5 8.5 6.5 12.5z"/><path d="M6.2 10.7 7.4 9.5M8.4 9.1 9.6 7.9M10.7 8.5 11.9 7.3M13.2 7.7 14.4 6.5M15.7 6.1 16.9 4.9"/><path d="M4 12.5h16"/><path d="M5.2 12.5 6.4 14.2M7.5 12.5 8.7 14.2M9.8 12.5 11 14.2M12.1 12.5 13.3 14.2M14.4 12.5 15.6 14.2M16.7 12.5 17.9 14.2"/><path d="M4 12.5v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M6.5 15.5h11"/><path d="M6.5 17.5h11"/><rect x="6.5" y="18.8" width="2.8" height="1.6" rx=".2"/><rect x="14.7" y="18.8" width="2.8" height="1.6" rx=".2"/></svg>
+{% endmacro %}
+
+{% macro watch_online_section(options) %}
+{% if options %}
+<section class="watch-online" aria-label="Watch online">
+  <h3 class="watch-online__title">Watch Online</h3>
+  <div class="watch-online__grid">
+    {% for option in options %}
+    <a class="watch-online__card" href="{{ option.url }}" target="_blank" rel="noopener noreferrer">
+      <span class="watch-online__logo">
+        {% if option.logo %}
+        <img src="{{ option.logo }}" alt="">
+        {% else %}
+        <span class="watch-online__logo-fallback">{{ option.name[:1] }}</span>
+        {% endif %}
+      </span>
+      <span class="watch-online__copy">
+        <strong class="watch-online__name">{{ option.name }}</strong>
+        <span class="watch-online__label">{{ option.label }}</span>
+      </span>
+      <span class="watch-online__arrow" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endmacro %}
+
+{% macro cant_miss_widget(media_type, tmdb_id, cant_miss) %}
+<div class="cant-miss-widget" data-cant-miss-widget>
+  {% if current_user.is_authenticated %}
+  <form method="POST" action="{{ url_for('cant_miss_toggle') }}" class="cant-miss-widget__form">
+    <input type="hidden" name="media_type" value="{{ media_type }}">
+    <input type="hidden" name="tmdb_id" value="{{ tmdb_id }}">
+    <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+    <button
+      type="submit"
+      class="cant-miss-btn{% if cant_miss.marked_by_me %} is-active{% endif %}"
+      aria-pressed="{{ 'true' if cant_miss.marked_by_me else 'false' }}"
+    >
+      <span class="cant-miss-btn__icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M6 16l4-9 4 9H6z" fill="currentColor" opacity=".95"/><path d="M14.5 7.5l3.5-1.5-1 3.5-2.5-2z" fill="currentColor"/><circle cx="16.5" cy="6" r=".85" fill="currentColor"/><path d="M5 17.5c0 .8.65 1.5 1.45 1.5h11.1c.8 0 1.45-.7 1.45-1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      </span>
+      <span class="cant-miss-btn__label">
+        {% if cant_miss.marked_by_me %}<span class="cant-miss-btn__check" aria-hidden="true">✓</span>{% endif %}
+        Can't miss this
+      </span>
+    </button>
+  </form>
+  {% else %}
+  <a href="{{ url_for('login', next=request.full_path if request.query_string else request.path) }}" class="cant-miss-btn">
+    <span class="cant-miss-btn__icon" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none"><path d="M6 16l4-9 4 9H6z" fill="currentColor" opacity=".95"/><path d="M14.5 7.5l3.5-1.5-1 3.5-2.5-2z" fill="currentColor"/><circle cx="16.5" cy="6" r=".85" fill="currentColor"/><path d="M5 17.5c0 .8.65 1.5 1.45 1.5h11.1c.8 0 1.45-.7 1.45-1.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    </span>
+    <span class="cant-miss-btn__label">Can't miss this</span>
+  </a>
+  {% endif %}
+
+  <div class="cant-miss-fans" aria-label="{{ cant_miss.fan_count_label }} fans">
+    <div class="cant-miss-fans__avatars" aria-hidden="true">
+      {% for avatar in cant_miss.avatars %}
+      <span class="cant-miss-fans__avatar{% if avatar.mock %} cant-miss-fans__avatar--mock{% endif %}"{% if avatar.mock %} style="--mock-hue: {{ avatar.hue }}"{% endif %}>
+        {% if avatar.pic %}
+        <img src="{{ url_for('static', filename='profile_pics/' ~ avatar.pic) }}" alt="">
+        {% else %}
+        <span>{{ avatar.initial }}</span>
+        {% endif %}
+      </span>
+      {% endfor %}
+    </div>
+    <span class="cant-miss-fans__count">{{ cant_miss.fan_count_label }} fan{% if cant_miss.fan_count != 1 %}s{% endif %}</span>
+  </div>
+</div>
+{% endmacro %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>
-  {% if view == "login" %}Login — Filmboxed
-  {% elif view == "signup" %}Sign Up — Filmboxed
-  {% elif view == "home" %}Filmboxed — Your life in film
-  {% elif view == "film" %}{{ movie.Title }} — Filmboxed
-  {% elif view == "person" %}{{ person.name }} — Filmboxed
-  {% elif view == "log_film" %}Log {{ movie.Title }} — Filmboxed
-  {% elif view == "dashboard" %}Dashboard — Filmboxed
-  {% elif view == "search" %}Search — Filmboxed
-  {% elif view == "schedule" %}Schedule — Filmboxed
-  {% elif view == "profile" %}{{ user.username }} — Filmboxed
-  {% elif view == "edit_profile" %}Edit Profile — Filmboxed
-  {% elif view == "feed" %}Feed — Filmboxed
-  {% elif view == "diary" %}Diary — Filmboxed
-  {% elif view == "lists" %}Stack — Filmboxed
-  {% elif view == "view_list" %}{{ movie_list.name }} — Filmboxed
-  {% elif view == "create_list" %}New Stack — Filmboxed
-  {% elif view == "edit_list" %}Edit Stack — Filmboxed
-  {% elif view == "settings" %}Settings — Filmboxed
-  {% elif view == "watchlist" %}Watchlist — Filmboxed
-  {% elif view == "popular" %}Popular — Filmboxed
-  {% elif view == "add_post" %}Add Review — Filmboxed
-  {% elif view == "add_review" %}Review {{ movie.Title }} — Filmboxed
-  {% elif view == "add_diary" %}Add Diary Entry — Filmboxed
-  {% elif view == "edit_post" %}Edit Review — Filmboxed
-  {% elif view == "edit_diary" %}Edit Diary Entry — Filmboxed
-  {% elif view == "bookmarks" %}Bookmarks — Filmboxed
-  {% elif view == "members" %}Members — Filmboxed
-  {% else %}Filmboxed{% endif %}
+  {% if view == "login" %}Login — 4 Movies
+  {% elif view == "signup" %}Sign Up — 4 Movies
+  {% elif view == "home" %}4 Movies — Cinema Forever
+  {% elif view == "film" %}{{ movie.Title }} — 4 Movies
+  {% elif view == "series" %}Series — 4 Movies
+  {% elif view == "popular_series" %}Popular Series — 4 Movies
+  {% elif view == "series_detail" %}{{ show.Title }} — 4 Movies
+  {% elif view == "person" %}{{ person.name }} — 4 Movies
+  {% elif view == "log_film" %}Log {{ movie.Title }} — 4 Movies
+  {% elif view == "dashboard" %}Dashboard — 4 Movies
+  {% elif view == "search" %}Search — 4 Movies
+  {% elif view == "schedule" %}Schedule — 4 Movies
+  {% elif view == "profile" %}{{ user.username }} — 4 Movies
+  {% elif view == "edit_profile" %}Edit Profile — 4 Movies
+  {% elif view == "feed" %}Feed — 4 Movies
+  {% elif view == "community" %}Community — 4 Movies
+  {% elif view == "diary" %}Diary — 4 Movies
+  {% elif view == "lists" %}Stack — 4 Movies
+  {% elif view == "view_list" %}{{ movie_list.name }} — 4 Movies
+  {% elif view == "create_list" %}New Stack — 4 Movies
+  {% elif view == "edit_list" %}Edit Stack — 4 Movies
+  {% elif view == "settings" %}Settings — 4 Movies
+  {% elif view == "watchlist" %}Watchlist — 4 Movies
+  {% elif view == "popular" %}Popular — 4 Movies
+  {% elif view == "add_post" %}Add Review — 4 Movies
+  {% elif view == "add_review" %}Review {{ movie.Title }} — 4 Movies
+  {% elif view == "add_diary" %}Add Diary Entry — 4 Movies
+  {% elif view == "edit_post" %}Edit Review — 4 Movies
+  {% elif view == "edit_diary" %}Edit Diary Entry — 4 Movies
+  {% elif view == "bookmarks" %}Bookmarks — 4 Movies
+  {% elif view == "members" %}Members — 4 Movies
+  {% else %}4 Movies{% endif %}
   </title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  {% if view == 'community' %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='community.css') }}">
+  {% endif %}
 </head>
 <body class="{% if view == 'login' or view == 'signup' %}is-auth{% endif %}">
 
   <header class="site-header">
     <div class="site-header__inner">
-      <a class="brand" href="{{ url_for('home') }}">
-        FILM<span>BOXED</span>
+      <a class="brand" href="{{ url_for('home') }}" aria-label="4 Movies home">
+        <img
+          class="brand__logo"
+          src="{{ url_for('static', filename='icons/4movies-logo.png') }}"
+          alt="4 Movies"
+          width="240"
+          height="96"
+        >
+        <span class="brand__title">4 Movies</span>
       </a>
 
       {% if current_user.is_authenticated %}
       <button class="nav-toggle" type="button" id="navToggle" aria-label="Toggle navigation">Menu</button>
-      <nav class="site-nav" id="siteNav">
-        <a class="{% if view in ['home', 'popular'] %}is-active{% endif %}" href="{{ url_for('home') }}">Films</a>
-        <a class="{% if view == 'schedule' %}is-active{% endif %}" href="{{ url_for('schedule') }}">Schedule</a>
-        <a class="{% if view == 'diary' %}is-active{% endif %}" href="{{ url_for('diary') }}">Diary</a>
-        <a class="{% if view == 'lists' %}is-active{% endif %}" href="{{ url_for('lists') }}">Stack</a>
-        <a class="{% if view == 'watchlist' %}is-active{% endif %}" href="{{ url_for('watchlist') }}">Watchlist</a>
-        <a class="nav-search {% if view == 'search' %}is-active{% endif %}" href="{{ url_for('search_movie') }}" aria-label="Search" title="Search">
-          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="7"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
+      <nav class="site-nav" id="siteNav" aria-label="Main">
+        <a class="nav-item {% if view in ['home', 'popular'] %}is-active{% endif %}" href="{{ url_for('home') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            {{ films_clapper_icon() }}
+          </span>
+          <span class="nav-item__label">Films</span>
+        </a>
+        <a class="nav-item {% if view in ['series', 'series_detail', 'popular_series'] %}is-active{% endif %}" href="{{ url_for('series_index') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="1.5"/><path d="M10 9.5l4 2.5-4 2.5z"/></svg>
+          </span>
+          <span class="nav-item__label">Series</span>
+        </a>
+        <a class="nav-item {% if view == 'schedule' %}is-active{% endif %}" href="{{ url_for('schedule') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="1.5"/><path d="M8 3v4M16 3v4M4 10h16"/><circle cx="17" cy="17" r="3.5"/><path d="M17 15.2v1.8l1.1.9"/></svg>
+          </span>
+          <span class="nav-item__label">Schedule</span>
+        </a>
+        <a class="nav-item {% if view in ['lists', 'view_list', 'create_list', 'edit_list'] %}is-active{% endif %}" href="{{ url_for('lists') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l7-4 7 4-7 4z"/><path d="M5 12l7 4 7-4"/><path d="M5 16l7 4 7-4"/></svg>
+          </span>
+          <span class="nav-item__label">Stack</span>
+        </a>
+        <a class="nav-item {% if view == 'community' %}is-active{% endif %}" href="{{ url_for('community') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="2.5"/><circle cx="16.5" cy="9" r="2"/><path d="M4.5 18c.6-2.2 2.4-3.5 4.5-3.5s3.9 1.3 4.5 3.5"/><path d="M14.5 18c.4-1.5 1.6-2.5 3-2.5 1 0 1.9.4 2.5 1.2"/></svg>
+          </span>
+          <span class="nav-item__label">Community</span>
+        </a>
+        <a class="nav-item {% if view == 'watchlist' %}is-active{% endif %}" href="{{ url_for('watchlist') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v16l-5-3.5L7 20z"/></svg>
+          </span>
+          <span class="nav-item__label">Watchlist</span>
+        </a>
+        <a class="nav-item nav-item--search {% if view == 'search' %}is-active{% endif %}" href="{{ url_for('search_movie') }}" aria-label="Search" title="Search">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.5-4.5"/></svg>
+          </span>
         </a>
       </nav>
 
-      <div class="header-end dropdown">
-        <a class="user-chip dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-          {{ current_user.username }}
-        </a>
-        <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end">
-          <li><a class="dropdown-item" href="{{ url_for('user_profile', username=current_user.username) }}">Profile</a></li>
-          <li><a class="dropdown-item" href="{{ url_for('edit_profile') }}">Edit Profile</a></li>
-          <li><a class="dropdown-item" href="{{ url_for('dashboard') }}">Dashboard</a></li>
-          <li><a class="dropdown-item" href="{{ url_for('settings') }}">Settings</a></li>
-          <li><a class="dropdown-item" href="{{ url_for('logout') }}">Sign Out</a></li>
+      <div class="header-end profile-menu dropdown">
+        <button
+          class="profile-menu__trigger dropdown-toggle"
+          type="button"
+          id="profileMenuToggle"
+          data-bs-toggle="dropdown"
+          aria-expanded="false"
+          aria-label="Account menu"
+        >
+          {% if current_user.profile_pic and current_user.profile_pic != 'default.jpg' %}
+          <img
+            class="profile-menu__avatar"
+            src="{{ url_for('static', filename='profile_pics/' ~ current_user.profile_pic) }}"
+            alt="{{ current_user.username }}"
+          >
+          {% else %}
+          <span class="profile-menu__avatar profile-menu__avatar--placeholder" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 19.5c.8-3 2.8-4.5 6.5-4.5s5.7 1.5 6.5 4.5"/></svg>
+          </span>
+          {% endif %}
+        </button>
+        <ul class="dropdown-menu dropdown-menu-end profile-menu__panel" aria-labelledby="profileMenuToggle">
+          <li>
+            <a class="profile-menu__item" href="{{ url_for('user_profile', username=current_user.username) }}">
+              <span class="profile-menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 19.5c.8-3 2.8-4.5 6.5-4.5s5.7 1.5 6.5 4.5"/></svg>
+              </span>
+              <span class="profile-menu__label">My Profile</span>
+            </a>
+          </li>
+          <li>
+            <a class="profile-menu__item" href="{{ url_for('user_profile', username=current_user.username, tab='reviews') }}">
+              <span class="profile-menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 12h6M9 16h4"/><path d="M9.5 8h5"/></svg>
+              </span>
+              <span class="profile-menu__label">My Reviews</span>
+            </a>
+          </li>
+          <li>
+            <a class="profile-menu__item" href="{{ url_for('settings') }}">
+              <span class="profile-menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.55 1.55M17.85 17.85l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.55-1.55M17.85 6.15l1.55-1.55"/></svg>
+              </span>
+              <span class="profile-menu__label">Settings</span>
+            </a>
+          </li>
+          <li class="profile-menu__logout-wrap">
+            <a class="profile-menu__item profile-menu__item--logout" href="{{ url_for('logout') }}">
+              <span class="profile-menu__icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 7V6a2 2 0 0 1 2-2h6v16h-6a2 2 0 0 1-2-2v-1"/><path d="M14 12H4"/><path d="M7 9l-3 3 3 3"/></svg>
+              </span>
+              <span class="profile-menu__label">Logout</span>
+            </a>
+          </li>
         </ul>
       </div>
       <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme">
         Theme
       </button>
       {% else %}
-      <nav class="site-nav" style="display:flex;">
-        <a class="{% if view == 'lists' %}is-active{% endif %}" href="{{ url_for('lists') }}">Stack</a>
-        <a class="{% if view == 'login' %}is-active{% endif %}" href="{{ url_for('login') }}">Login</a>
-        <a class="{% if view == 'signup' %}is-active{% endif %}" href="{{ url_for('signup') }}">Sign Up</a>
+      <button class="nav-toggle" type="button" id="navToggle" aria-label="Toggle navigation">Menu</button>
+      <nav class="site-nav site-nav--guest" id="siteNav" aria-label="Main">
+        <a class="nav-item {% if view in ['home', 'popular'] %}is-active{% endif %}" href="{{ url_for('home') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            {{ films_clapper_icon() }}
+          </span>
+          <span class="nav-item__label">Films</span>
+        </a>
+        <a class="nav-item {% if view in ['series', 'series_detail', 'popular_series'] %}is-active{% endif %}" href="{{ url_for('series_index') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="1.5"/><path d="M10 9.5l4 2.5-4 2.5z"/></svg>
+          </span>
+          <span class="nav-item__label">Series</span>
+        </a>
+        <a class="nav-item {% if view == 'schedule' %}is-active{% endif %}" href="{{ url_for('schedule') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="1.5"/><path d="M8 3v4M16 3v4M4 10h16"/><circle cx="17" cy="17" r="3.5"/><path d="M17 15.2v1.8l1.1.9"/></svg>
+          </span>
+          <span class="nav-item__label">Schedule</span>
+        </a>
+        <a class="nav-item {% if view in ['lists', 'view_list'] %}is-active{% endif %}" href="{{ url_for('lists') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l7-4 7 4-7 4z"/><path d="M5 12l7 4 7-4"/><path d="M5 16l7 4 7-4"/></svg>
+          </span>
+          <span class="nav-item__label">Stack</span>
+        </a>
+        <a class="nav-item {% if view == 'community' %}is-active{% endif %}" href="{{ url_for('community') }}">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="2.5"/><circle cx="16.5" cy="9" r="2"/><path d="M4.5 18c.6-2.2 2.4-3.5 4.5-3.5s3.9 1.3 4.5 3.5"/><path d="M14.5 18c.4-1.5 1.6-2.5 3-2.5 1 0 1.9.4 2.5 1.2"/></svg>
+          </span>
+          <span class="nav-item__label">Community</span>
+        </a>
+        <a class="nav-item nav-item--search {% if view == 'search' %}is-active{% endif %}" href="{{ url_for('search_movie') }}" aria-label="Search" title="Search">
+          <span class="nav-item__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.5-4.5"/></svg>
+          </span>
+        </a>
+        <a class="nav-item nav-item--text {% if view == 'login' %}is-active{% endif %}" href="{{ url_for('login') }}">
+          <span class="nav-item__label">Login</span>
+        </a>
+        <a class="nav-item nav-item--text {% if view == 'signup' %}is-active{% endif %}" href="{{ url_for('signup') }}">
+          <span class="nav-item__label">Sign Up</span>
+        </a>
       </nav>
       <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme">
         Theme
@@ -91,7 +296,7 @@
     </div>
   </header>
 
-  <main class="{% if view == 'login' or view == 'signup' %}{% elif view == 'home' %}landing-main{% elif view == 'schedule' %}schedule-shell{% elif view == 'film' %}film-shell{% else %}page-shell{% endif %}">
+  <main class="{% if view == 'login' or view == 'signup' %}{% elif view == 'home' or (view == 'series' and not query) %}landing-main{% elif view == 'community' %}community-shell{% elif view == 'schedule' %}schedule-shell{% elif view in ['film', 'series_detail'] %}film-shell{% else %}page-shell{% endif %}">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="flash-stack{% if view == 'home' %} page-shell{% endif %}">
@@ -105,7 +310,14 @@
 {% if view == "login" %}
 <div class="auth-page">
   <div class="auth-stage">
-    <h1 class="brand-hero">FILM<span>BOXED</span></h1>
+    <div class="auth-stage__brand">
+      <img
+        class="brand-hero__logo"
+        src="{{ url_for('static', filename='icons/4movies-logo.png') }}"
+        alt="4 Movies"
+      >
+      <p class="brand__title brand__title--hero">4 Movies</p>
+    </div>
     <p class="tagline">Your private cinema lobby for reviews and rewatches.</p>
 
     <div class="form-panel">
@@ -130,7 +342,14 @@
 {% elif view == "signup" %}
 <div class="auth-page">
   <div class="auth-stage">
-    <h1 class="brand-hero">FILM<span>BOXED</span></h1>
+    <div class="auth-stage__brand">
+      <img
+        class="brand-hero__logo"
+        src="{{ url_for('static', filename='icons/4movies-logo.png') }}"
+        alt="4 Movies"
+      >
+      <p class="brand__title brand__title--hero">4 Movies</p>
+    </div>
     <p class="tagline">Claim your seat. Rate, remember, and revisit.</p>
 
     <div class="form-panel">
@@ -147,7 +366,7 @@
           <label for="password" class="form-label">Password</label>
           <input type="password" class="form-control" id="password" name="password" required autocomplete="new-password" minlength="6" placeholder="At least 6 characters">
         </div>
-        <button type="submit" class="btn btn-primary">Join Filmboxed</button>
+        <button type="submit" class="btn btn-primary">Join 4 Movies</button>
       </form>
       <p class="auth-switch">
         Already a member? <a href="{{ url_for('login') }}">Sign in</a>
@@ -214,13 +433,13 @@
 </section>
 {% endif %}
 
-<section class="landing-footer" id="landing-footer" aria-label="More from Filmboxed">
+<section class="landing-footer" id="landing-footer" aria-label="More from 4 Movies">
   <div class="landing-footer__grid">
-    <a class="landing-promo landing-promo--community" href="{{ community_url }}" target="_blank" rel="noopener noreferrer">
+    <a class="landing-promo landing-promo--community" href="{{ community_url }}">
       <p class="landing-promo__eyebrow">Join the Community</p>
       <h3 class="landing-promo__title">Talk films live</h3>
-      <p class="landing-promo__copy">Text, voice &amp; video rooms with 100+ members. Jump in anytime.</p>
-      <span class="landing-promo__cta">Enter lounge →</span>
+      <p class="landing-promo__copy">Share thoughts, like posts, and follow members in the Community feed.</p>
+      <span class="landing-promo__cta">Open community →</span>
     </a>
 
     <a class="landing-promo landing-promo--stack" href="{% if current_user.is_authenticated %}{{ url_for('lists') }}{% else %}{{ url_for('signup') }}{% endif %}">
@@ -254,7 +473,7 @@
     </blockquote>
     <blockquote class="landing-quote-bar__quote" data-quote hidden>
       <span class="landing-quote-bar__mark" aria-hidden="true">“</span>
-      <p>Films stay. Opinions matter. That’s the whole point. <cite>— Filmboxed</cite></p>
+      <p>Films stay. Opinions matter. That’s the whole point. <cite>— 4 Movies</cite></p>
     </blockquote>
     <blockquote class="landing-quote-bar__quote" data-quote hidden>
       <span class="landing-quote-bar__mark" aria-hidden="true">“</span>
@@ -270,11 +489,32 @@
 </div>
 
 {% elif view == "film" %}
-<div class="film-page{% if movie.Backdrop %} has-cover{% endif %}">
+<div class="film-page{% if movie.Backdrop or movie.Trailer %} has-cover{% endif %}">
   {% if movie.Backdrop %}
-  <div class="film-cover" aria-hidden="true">
+  <div class="film-cover">
     <img class="film-cover__img" src="{{ movie.Backdrop }}" alt="">
     <div class="film-cover__fade"></div>
+    {% if movie.Trailer %}
+    <button
+      type="button"
+      class="film-cover__play"
+      data-trailer-url="{{ movie.Trailer }}"
+      aria-label="Play {{ movie.Title }} trailer"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
+    </button>
+    {% endif %}
+  </div>
+  {% elif movie.Trailer %}
+  <div class="film-cover film-cover--compact">
+    <button
+      type="button"
+      class="film-cover__play"
+      data-trailer-url="{{ movie.Trailer }}"
+      aria-label="Play {{ movie.Title }} trailer"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
+    </button>
   </div>
   {% endif %}
   <div class="page-shell film-page__body">
@@ -307,6 +547,12 @@
 
     <p class="film-hub__plot">{{ movie.Plot }}</p>
 
+    {% if is_upcoming and cant_miss %}
+    {{ cant_miss_widget('movie', movie.tmdb_id, cant_miss) }}
+    {% endif %}
+
+    {{ watch_online_section(watch_online) }}
+
     {% if current_user.is_authenticated %}
     <div class="action-strip">
       {% if not in_watchlist %}
@@ -318,10 +564,6 @@
       </form>
       {% else %}
         <a class="btn btn-outline-secondary" href="{{ url_for('watchlist') }}">On Watchlist</a>
-      {% endif %}
-      <button type="button" class="btn btn-secondary" id="watch-ott-toggle" aria-expanded="false" aria-controls="watch-ott-panel">Watch</button>
-      {% if movie.Trailer %}
-        <a class="btn btn-outline-secondary" href="{{ movie.Trailer }}" target="_blank" rel="noopener">Trailer</a>
       {% endif %}
     </div>
 
@@ -381,109 +623,11 @@
     {% else %}
     <div class="action-strip">
       <a class="btn btn-primary" href="{{ url_for('login') }}">Sign in to log & rate</a>
-      <button type="button" class="btn btn-secondary" id="watch-ott-toggle" aria-expanded="false" aria-controls="watch-ott-panel">Watch</button>
-      {% if movie.Trailer %}
-        <a class="btn btn-outline-secondary" href="{{ movie.Trailer }}" target="_blank" rel="noopener">Trailer</a>
-      {% endif %}
     </div>
     {% endif %}
 
-    <div class="watch-ott-panel" id="watch-ott-panel" hidden>
-      <div class="watch-ott-panel__head">
-        <h3>Where to watch</h3>
-        {% if movie.ReleaseLabel or movie.Year %}
-        <p class="watch-ott-panel__release">Released {{ movie.ReleaseLabel or movie.Year }}</p>
-        {% endif %}
-      </div>
-
-      {% set wp = watch_providers %}
-      {% if wp and (wp.stream or wp.rent or wp.buy) %}
-        {% if wp.region %}
-        <p class="watch-ott-panel__region text-muted">Availability in {{ wp.region }}</p>
-        {% endif %}
-
-        {% if wp.stream %}
-        <div class="watch-ott-group">
-          <h4>Stream</h4>
-          <ul class="watch-ott-list">
-            {% for p in wp.stream %}
-            <li>
-              {% if p.logo %}<img src="{{ p.logo }}" alt="" width="36" height="36">{% endif %}
-              <span>{{ p.name }}</span>
-            </li>
-            {% endfor %}
-          </ul>
-        </div>
-        {% endif %}
-
-        {% if wp.rent %}
-        <div class="watch-ott-group">
-          <h4>Rent</h4>
-          <ul class="watch-ott-list">
-            {% for p in wp.rent %}
-            <li>
-              {% if p.logo %}<img src="{{ p.logo }}" alt="" width="36" height="36">{% endif %}
-              <span>{{ p.name }}</span>
-            </li>
-            {% endfor %}
-          </ul>
-        </div>
-        {% endif %}
-
-        {% if wp.buy %}
-        <div class="watch-ott-group">
-          <h4>Buy</h4>
-          <ul class="watch-ott-list">
-            {% for p in wp.buy %}
-            <li>
-              {% if p.logo %}<img src="{{ p.logo }}" alt="" width="36" height="36">{% endif %}
-              <span>{{ p.name }}</span>
-            </li>
-            {% endfor %}
-          </ul>
-        </div>
-        {% endif %}
-
-        {% if wp.link %}
-        <p class="watch-ott-panel__link">
-          <a href="{{ wp.link }}" target="_blank" rel="noopener">See all options</a>
-        </p>
-        {% endif %}
-        <p class="watch-ott-panel__credit text-muted">Streaming data from JustWatch</p>
-      {% else %}
-        <p class="watch-ott-panel__empty">No streaming info found for this region yet.</p>
-        {% if movie.ReleaseLabel or movie.Year %}
-        <p class="watch-ott-panel__release">
-          Theatrical release:
-          {% if movie.ReleaseLabel %}{{ movie.ReleaseLabel }}{% else %}{{ movie.Year }}{% endif %}
-        </p>
-        {% endif %}
-      {% endif %}
-    </div>
   </div>
 </section>
-
-<script>
-(function () {
-  var toggle = document.getElementById('watch-ott-toggle');
-  var panel = document.getElementById('watch-ott-panel');
-  if (!toggle || !panel) return;
-  toggle.addEventListener('click', function () {
-    var open = panel.hasAttribute('hidden');
-    if (open) {
-      panel.removeAttribute('hidden');
-      toggle.setAttribute('aria-expanded', 'true');
-      toggle.classList.add('btn-primary');
-      toggle.classList.remove('btn-secondary');
-    } else {
-      panel.setAttribute('hidden', '');
-      toggle.setAttribute('aria-expanded', 'false');
-      toggle.classList.remove('btn-primary');
-      toggle.classList.add('btn-secondary');
-    }
-  });
-})();
-</script>
 
 {% if histogram and reviews %}
 <section class="band">
@@ -583,7 +727,364 @@
   </div>
 </section>
   </div>
+
+  {% if movie.Trailer %}
+  <div class="film-trailer-modal" id="filmTrailerModal" hidden>
+    <div class="film-trailer-modal__backdrop" data-trailer-close></div>
+    <div class="film-trailer-modal__dialog" role="dialog" aria-modal="true" aria-label="{{ movie.Title }} trailer">
+      <button type="button" class="film-trailer-modal__close" data-trailer-close aria-label="Close trailer">×</button>
+      <div class="film-trailer-modal__frame" id="filmTrailerFrame"></div>
+    </div>
+  </div>
+  <script>
+  (function () {
+    const playBtn = document.querySelector('.film-cover__play');
+    const modal = document.getElementById('filmTrailerModal');
+    const frameHost = document.getElementById('filmTrailerFrame');
+    if (!playBtn || !modal || !frameHost) return;
+
+    function youtubeEmbedUrl(url) {
+      if (!url) return null;
+      try {
+        const parsed = new URL(url);
+        if (parsed.hostname.includes('youtu.be')) {
+          return 'https://www.youtube.com/embed/' + parsed.pathname.replace(/^\//, '') + '?autoplay=1&rel=0';
+        }
+        const id = parsed.searchParams.get('v');
+        if (id) return 'https://www.youtube.com/embed/' + id + '?autoplay=1&rel=0';
+      } catch (err) {
+        return null;
+      }
+      return null;
+    }
+
+    function closeModal() {
+      modal.hidden = true;
+      frameHost.innerHTML = '';
+      document.body.style.overflow = '';
+    }
+
+    function openModal(url) {
+      const embed = youtubeEmbedUrl(url);
+      if (embed) {
+        frameHost.innerHTML = '<iframe src="' + embed + '" title="Trailer" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
+        modal.hidden = false;
+        document.body.style.overflow = 'hidden';
+        return;
+      }
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    playBtn.addEventListener('click', function () {
+      openModal(playBtn.dataset.trailerUrl);
+    });
+
+    modal.querySelectorAll('[data-trailer-close]').forEach(function (el) {
+      el.addEventListener('click', closeModal);
+    });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && !modal.hidden) closeModal();
+    });
+  })();
+  </script>
+  {% endif %}
 </div>
+
+{% elif view == "series" %}
+{% if query %}
+<div class="page-shell">
+  <div class="page-head series-page-head">
+    <div>
+      <h1>Series</h1>
+      <p class="lede">Results for “{{ query }}” — TV shows only.</p>
+    </div>
+  </div>
+
+  <form action="{{ url_for('series_index') }}" method="get" class="series-search search-box">
+    <div class="input-group">
+      <input
+        type="search"
+        name="query"
+        class="form-control"
+        value="{{ query or '' }}"
+        placeholder="Search series by title..."
+        autocomplete="off"
+        aria-label="Search series"
+      >
+      <button type="submit" class="btn btn-primary">Search</button>
+      <a href="{{ url_for('series_index') }}" class="btn btn-secondary">Clear</a>
+    </div>
+  </form>
+
+  {% if series_list %}
+    {% for show in series_list %}
+    <div class="movie-box">
+      <a class="poster" href="{{ url_for('series_page', tmdb_id=show.tmdb_id) }}">
+        <img src="{{ show.Poster if show.Poster else 'https://via.placeholder.com/150x225?text=No+Poster' }}" alt="{{ show.Title }} poster">
+      </a>
+      <div class="details">
+        <h3><a href="{{ url_for('series_page', tmdb_id=show.tmdb_id) }}">{{ show.Title }} ({{ show.Year }})</a></h3>
+        <p><strong>Genre:</strong> {{ show.Genre }}</p>
+        <p><strong>First aired:</strong> {{ show.FirstAir if show.FirstAir != 'N/A' else show.Year }}</p>
+        <p><strong>TMDB:</strong> {{ show.imdbRating }}</p>
+        <p>{{ show.Plot }}</p>
+        <div class="review-actions">
+          <a href="{{ url_for('series_page', tmdb_id=show.tmdb_id) }}" class="btn btn-sm btn-primary">Open Series</a>
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty-state">No series found for “{{ query }}”. Try another title.</div>
+  {% endif %}
+</div>
+{% else %}
+<section class="landing-hero landing-hero--cover" aria-label="Trending series">
+  {% if weekly_trending_series %}
+  <div class="landing-hero__pan" aria-label="Trending TV this week">
+    <div class="landing-hero__track">
+      {% for show in weekly_trending_series %}
+      <a class="hero-still" href="{{ url_for('series_page', tmdb_id=show.id) }}" title="{{ show.title }}">
+        <img src="{{ show.image or show.poster }}" alt="{{ show.title }}" loading="lazy">
+        <span class="hero-still__cap">
+          <span class="hero-still__title">{{ show.title }}</span>
+        </span>
+      </a>
+      {% endfor %}
+      {% for show in weekly_trending_series %}
+      <a class="hero-still" href="{{ url_for('series_page', tmdb_id=show.id) }}" title="{{ show.title }}" aria-hidden="true" tabindex="-1">
+        <img src="{{ show.image or show.poster }}" alt="" loading="lazy">
+        <span class="hero-still__cap">
+          <span class="hero-still__title">{{ show.title }}</span>
+        </span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+  <div class="landing-hero__shade" aria-hidden="true"></div>
+  <div class="landing-hero__content">
+    <div class="landing-hero__cta">
+      <a href="#series-browse" class="btn btn-primary">Explore Series →</a>
+    </div>
+    {% if not weekly_trending_series and not tmdb_configured %}
+    <p class="landing-hero__empty">Add your TMDB API key to load trending series.</p>
+    {% endif %}
+  </div>
+</section>
+
+<div class="page-shell" id="series-browse">
+  <form action="{{ url_for('series_index') }}" method="get" class="series-search search-box">
+    <div class="input-group">
+      <input
+        type="search"
+        name="query"
+        class="form-control"
+        value=""
+        placeholder="Search series by title..."
+        autocomplete="off"
+        aria-label="Search series"
+      >
+      <button type="submit" class="btn btn-primary">Search</button>
+    </div>
+  </form>
+
+  {% if popular_series %}
+  <section class="band">
+    <div class="band-head">
+      <h2>Community Rated Series</h2>
+      <a href="{{ url_for('popular_series_page') }}">See all</a>
+    </div>
+    <div class="poster-rail">
+      {% for show in popular_series %}
+      <a class="poster-card" href="{{ url_for('series_page', tmdb_id=show.tmdb_id) }}">
+        <div class="poster-tile">
+          <img src="{{ show.poster_url or 'https://via.placeholder.com/200x300?text=No+Poster' }}" alt="{{ show.title }}" loading="lazy">
+        </div>
+        <h5>{{ show.title }}</h5>
+        <div class="meta">
+          <span class="stars-display" data-rating="{{ show.avg_rating|round(1) }}"></span>
+          · {{ show.rating_count }} ep{% if show.rating_count != 1 %}s{% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  {% if series_list %}
+  <section class="band">
+    <div class="band-head">
+      <h2>Trending Series</h2>
+    </div>
+    <div class="poster-rail">
+      {% for item in series_list %}
+      <a class="poster-card" href="{{ url_for('series_page', tmdb_id=item.id) }}">
+        <div class="poster-tile">
+          <img src="{{ item.poster or 'https://via.placeholder.com/200x300?text=No+Poster' }}" alt="{{ item.title }}" loading="lazy">
+        </div>
+        <h5>{{ item.title }}</h5>
+        <div class="meta">
+          {% if item.year %}{{ item.year }}{% endif %}
+          {% if item.platform_label %} · {{ item.platform_label }}{% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% else %}
+  <div class="empty-state">No series available right now. Check back soon.</div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% elif view == "series_detail" %}
+<div class="film-page{% if show.Backdrop or show.Trailer %} has-cover{% endif %}">
+  {% if show.Backdrop %}
+  <div class="film-cover">
+    <img class="film-cover__img" src="{{ show.Backdrop }}" alt="">
+    <div class="film-cover__fade"></div>
+    {% if show.Trailer %}
+    <button
+      type="button"
+      class="film-cover__play"
+      data-trailer-url="{{ show.Trailer }}"
+      aria-label="Play {{ show.Title }} trailer"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
+    </button>
+    {% endif %}
+  </div>
+  {% elif show.Trailer %}
+  <div class="film-cover film-cover--compact">
+    <button
+      type="button"
+      class="film-cover__play"
+      data-trailer-url="{{ show.Trailer }}"
+      aria-label="Play {{ show.Title }} trailer"
+    >
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
+    </button>
+  </div>
+  {% endif %}
+  <div class="page-shell film-page__body">
+<section class="film-hub film-hub--series">
+  {% if overall_rating is not none %}
+  <div class="series-score-edge" aria-label="Your overall series score {{ overall_rating|round(1) }} out of 10 from {{ rated_count }} episodes">
+    <span class="series-score-edge__label">Your score</span>
+    <span class="series-score-edge__main">
+      <strong class="series-score-edge__value">{{ overall_rating|round(1) }}</strong>
+      <span class="series-score-edge__scale">/10</span>
+    </span>
+    <span class="series-score-edge__stars stars-display" data-rating="{{ overall_rating|round(1) }}"></span>
+    <span class="series-score-edge__sub">{{ (overall_rating / 2)|round(1) }}/5 · {{ rated_count }} ep</span>
+  </div>
+  {% elif current_user.is_authenticated %}
+  <div class="series-score-edge series-score-edge--empty" aria-label="No series score yet">
+    <span class="series-score-edge__label">Your score</span>
+    <span class="series-score-edge__main">
+      <strong class="series-score-edge__value">—</strong>
+      <span class="series-score-edge__scale">/10</span>
+    </span>
+    <span class="series-score-edge__sub">Rate episodes below</span>
+  </div>
+  {% endif %}
+  <div class="film-hub__poster poster-tile">
+    <img src="{{ show.Poster or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ show.Title }}">
+    <div class="film-hub__poster-meta">
+      <span>{{ show.Year }}</span>
+      {% if show.number_of_seasons %}<span>{{ show.number_of_seasons }} season{% if show.number_of_seasons != 1 %}s{% endif %}</span>{% endif %}
+      {% if show.Genre and show.Genre != 'N/A' %}<span>{{ show.Genre.split(',')[0] }}</span>{% endif %}
+    </div>
+  </div>
+  <div class="film-hub__meta">
+    <p class="eyebrow">Series</p>
+    <h1>{{ show.Title }}</h1>
+    <p class="tagline-meta">
+      {{ show.Year }}
+      {% if show.Genre and show.Genre != 'N/A' %} · {{ show.Genre }}{% endif %}
+      {% if show.status %} · {{ show.status }}{% endif %}
+      {% if show.imdbRating and show.imdbRating != 'N/A' %} · TMDB {{ show.imdbRating }}{% endif %}
+    </p>
+
+    <p class="film-hub__plot">{{ show.Plot }}</p>
+
+    {% if is_upcoming and cant_miss %}
+    {{ cant_miss_widget('tv', show.tmdb_id, cant_miss) }}
+    {% endif %}
+
+    {{ watch_online_section(watch_online) }}
+
+    <div class="schedule-pills series-seasons" role="tablist" aria-label="Seasons">
+      {% for s in seasons %}
+      <a
+        class="schedule-pill{% if s.number == selected_season %} is-active{% endif %}"
+        href="{{ url_for('series_page', tmdb_id=show.tmdb_id, season=s.number) }}"
+      >{{ s.name }}</a>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="band series-episodes">
+  <div class="band-head">
+    <h2>{{ season.name }}</h2>
+    <span class="text-muted" style="font-family:var(--font-body);font-size:0.82rem;">
+      {{ season.episodes|length }} episode{% if season.episodes|length != 1 %}s{% endif %}
+    </span>
+  </div>
+
+  {% if season.episodes %}
+  <div class="series-episode-list">
+    {% for ep in season.episodes %}
+    <article class="series-episode">
+      <div class="series-episode__info">
+        {% if ep.still %}
+        <img class="series-episode__still" src="{{ ep.still }}" alt="" loading="lazy">
+        {% else %}
+        <div class="series-episode__still series-episode__still--empty" aria-hidden="true"></div>
+        {% endif %}
+        <div class="series-episode__copy">
+          <p class="series-episode__label">Episode {{ ep.number }}</p>
+          <h3 class="series-episode__title">{{ ep.title }}</h3>
+          <p class="series-episode__meta">{{ ep.air_label }}{% if ep.overview %} · {{ ep.overview }}{% endif %}</p>
+        </div>
+      </div>
+
+      <div class="series-episode__rate">
+        {% if current_user.is_authenticated %}
+        <form
+          class="episode-rating-form"
+          method="POST"
+          action="{{ url_for('rate_episode', tmdb_id=show.tmdb_id, season=selected_season, episode=ep.number) }}"
+        >
+          <span class="series-episode__rate-label">Your rating</span>
+          <div class="star-rating" data-name="rating" data-value="{{ ep.user_rating or 0 }}"></div>
+        </form>
+        {% else %}
+        <a class="btn btn-sm btn-secondary" href="{{ url_for('login', next=request.path) }}">Sign in to rate</a>
+        {% endif %}
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No episodes listed for this season yet.</div>
+  {% endif %}
+</section>
+  </div>
+</div>
+
+  {% if show.Trailer %}
+  <div class="film-trailer-modal" id="filmTrailerModal" hidden>
+    <div class="film-trailer-modal__backdrop" data-trailer-close></div>
+    <div class="film-trailer-modal__dialog" role="dialog" aria-modal="true" aria-label="{{ show.Title }} trailer">
+      <button type="button" class="film-trailer-modal__close" data-trailer-close aria-label="Close trailer">×</button>
+      <div class="film-trailer-modal__frame" id="filmTrailerFrame"></div>
+    </div>
+  </div>
+  {% endif %}
 
 {% elif view == "person" %}
 <article class="person-page">
@@ -929,7 +1430,7 @@
           {% for film in group.films %}
           <a
             class="schedule-poster"
-            href="{% if film.media == 'tv' %}{{ url_for('search_movie', query=film.title) }}{% else %}{{ url_for('film_page', imdb_id=film.id) }}{% endif %}"
+            href="{% if film.media == 'tv' %}{{ url_for('series_page', tmdb_id=film.id) }}{% else %}{{ url_for('film_page', imdb_id=film.id) }}{% endif %}"
             title="{{ film.title }}"
           >
             <div class="schedule-poster__art">
@@ -995,7 +1496,7 @@
       <p class="lede" style="border:none;padding:0;margin:0.35rem 0 0;">{{ user.bio }}</p>
     {% endif %}
     <p class="profile-stats">
-      {{ posts|length }} reviews · {{ watched_films|length }} watched · {{ liked_films|length }} likes · {{ diary_entries|length }} diary
+      {{ stats.review_count }} reviews · {{ stats.watched_count }} watched · {{ stats.like_count }} likes · {{ stats.diary_count }} diary
     </p>
     {% if current_user.is_authenticated and current_user.username != user.username %}
       <form action="{{ url_for('unfollow_user' if is_following else 'follow_user', username=user.username) }}" method="POST" class="mt-3">
@@ -1222,6 +1723,9 @@
   </form>
 </div>
 
+{% elif view == "community" %}
+{% include 'community_hub.html' %}
+
 {% elif view == "feed" %}
 <div class="page-head">
   <div>
@@ -1265,8 +1769,30 @@
 {% elif view == "diary" %}
 <div class="diary-page">
   <header class="diary-page__head">
-    <h1>Diary</h1>
-    <p class="diary-page__lede">A private log of nights at the movies.</p>
+    <div class="diary-page__intro">
+      <h1>Diary</h1>
+      <p class="diary-page__lede">
+        {% if diary_type == 'series' %}
+        A private log of shows you have rated episode by episode.
+        {% else %}
+        A private log of nights at the movies.
+        {% endif %}
+      </p>
+    </div>
+    <div class="diary-page__filters schedule-pills" role="tablist" aria-label="Diary type">
+      <a
+        class="schedule-pill{% if diary_type == 'film' %} is-active{% endif %}"
+        href="{{ url_for('diary', type='film') }}"
+        role="tab"
+        aria-selected="{{ 'true' if diary_type == 'film' else 'false' }}"
+      >Film</a>
+      <a
+        class="schedule-pill{% if diary_type == 'series' %} is-active{% endif %}"
+        href="{{ url_for('diary', type='series') }}"
+        role="tab"
+        aria-selected="{{ 'true' if diary_type == 'series' else 'false' }}"
+      >Series</a>
+    </div>
   </header>
 
   {% if diary_months %}
@@ -1279,6 +1805,7 @@
       <div class="diary-rail">
         {% for entry in month.entries %}
         <article class="diary-card">
+          {% if diary_type == 'film' %}
           <details class="diary-card__menu">
             <summary aria-label="Entry options">⋮</summary>
             <div class="diary-card__dropdown">
@@ -1288,7 +1815,8 @@
               </form>
             </div>
           </details>
-          <a class="diary-card__link" href="{% if entry.imdb_id %}{{ url_for('film_page', imdb_id=entry.imdb_id) }}{% else %}{{ url_for('film_by_title', title=entry.title) }}{% endif %}">
+          {% endif %}
+          <a class="diary-card__link" href="{% if diary_type == 'series' %}{{ url_for('series_page', tmdb_id=entry.series_tmdb_id) }}{% elif entry.imdb_id %}{{ url_for('film_page', imdb_id=entry.imdb_id) }}{% else %}{{ url_for('film_by_title', title=entry.title) }}{% endif %}">
             <img class="diary-card__img" src="{{ entry.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ entry.title }}" loading="lazy">
             <span class="diary-card__shade" aria-hidden="true"></span>
             <span class="diary-card__meta">
@@ -1296,7 +1824,9 @@
               {% if entry.rating %}
               <span class="stars-display diary-card__stars" data-rating="{{ entry.rating }}" style="--fill: {{ (entry.rating / 10 * 100)|round }}%"></span>
               {% endif %}
-              <span class="diary-card__date">{{ entry.watched_date.strftime('%b %d, %Y') }}</span>
+              <span class="diary-card__date">
+                {% if diary_type == 'series' %}{{ entry.episode_count }} ep · {% endif %}{{ entry.watched_date.strftime('%b %d, %Y') }}
+              </span>
             </span>
           </a>
         </article>
@@ -1306,10 +1836,20 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="empty-state">No diary entries yet. Search a film and hit Log.</div>
+  <div class="empty-state">
+    {% if diary_type == 'series' %}
+    No series rated yet. Open <a href="{{ url_for('series_index') }}">Series</a> and rate episodes.
+    {% else %}
+    No diary entries yet. Search a film and save a review.
+    {% endif %}
+  </div>
   {% endif %}
 
+  {% if diary_type == 'film' %}
   <a href="{{ url_for('add_diary') }}" class="diary-fab" aria-label="Add diary entry">+</a>
+  {% else %}
+  <a href="{{ url_for('series_index') }}" class="diary-fab" aria-label="Browse series">+</a>
+  {% endif %}
 </div>
 
 {% elif view == "lists" %}
@@ -1701,6 +2241,32 @@
   {% endfor %}
 </div>
 
+{% elif view == "popular_series" %}
+<div class="page-head">
+  <div>
+    <h1>Popular Series</h1>
+    <p class="lede">Shows the community has rated episode by episode.</p>
+  </div>
+  <a href="{{ url_for('series_index') }}" class="btn btn-secondary">Back to Series</a>
+</div>
+
+<div class="poster-grid">
+  {% for show in series %}
+  <a class="poster-card" href="{{ url_for('series_page', tmdb_id=show.tmdb_id) }}">
+    <div class="poster-tile">
+      <img src="{{ show.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ show.title }}">
+    </div>
+    <h5>{{ show.title }}</h5>
+    <div class="meta">
+      <span class="stars-display" data-rating="{{ show.avg_rating|round(1) }}"></span>
+      · {{ show.rating_count }} ep{% if show.rating_count != 1 %}s{% endif %} · {{ show.reviewer_count }} member{% if show.reviewer_count != 1 %}s{% endif %}
+    </div>
+  </a>
+  {% else %}
+  <div class="empty-state" style="grid-column:1/-1;">No community-rated series yet. Rate episodes on any show to get started.</div>
+  {% endfor %}
+</div>
+
 {% elif view == "add_post" %}
 <div class="page-head">
   <div>
@@ -1902,6 +2468,51 @@
 {% endif %}
   </main>
 
+  {% if view not in ['login', 'signup'] %}
+  <footer class="site-footer" aria-label="Site footer">
+    <div class="site-footer__inner">
+      <div class="site-footer__brand">
+        <a class="site-footer__logo-link" href="{{ url_for('home') }}">
+          <img
+            class="site-footer__logo"
+            src="{{ url_for('static', filename='icons/4movies-logo.png') }}"
+            alt=""
+            width="56"
+            height="56"
+          >
+          <span class="site-footer__title">4 Movies</span>
+        </a>
+        <p class="site-footer__tagline">4 Generations. 1 Love. Cinema Forever.</p>
+      </div>
+
+      <nav class="site-footer__nav" aria-label="Footer">
+        <div class="site-footer__col">
+          <h3 class="site-footer__heading">Explore</h3>
+          <a href="{{ url_for('home') }}">Films</a>
+          <a href="{{ url_for('series_index') }}">Series</a>
+          <a href="{{ url_for('popular') }}">Popular</a>
+          <a href="{{ url_for('schedule') }}">Schedule</a>
+        </div>
+        <div class="site-footer__col">
+          <h3 class="site-footer__heading">Community</h3>
+          <a href="{{ url_for('community') }}">Feed</a>
+          {% if current_user.is_authenticated %}
+          <a href="{{ url_for('lists') }}">Stack</a>
+          <a href="{{ url_for('watchlist') }}">Watchlist</a>
+          <a href="{{ url_for('user_profile', username=current_user.username) }}">Profile</a>
+          {% else %}
+          <a href="{{ url_for('login') }}">Login</a>
+          <a href="{{ url_for('signup') }}">Sign Up</a>
+          {% endif %}
+        </div>
+      </nav>
+    </div>
+    <div class="site-footer__bottom">
+      <p>&copy; 2026 4 Movies. All rights reserved.</p>
+    </div>
+  </footer>
+  {% endif %}
+
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='stars.js') }}"></script>
   <script>
@@ -1986,6 +2597,69 @@
 
   langFilters.forEach((btn) => {
     btn.addEventListener('click', () => showLangKind(btn.dataset.langKind));
+  });
+})();
+</script>
+{% endif %}
+{% if view == "community" %}
+<script src="{{ url_for('static', filename='community.js') }}"></script>
+{% endif %}
+{% if view == "series_detail" %}
+<script>
+(function () {
+  document.querySelectorAll('.episode-rating-form').forEach((form) => {
+    const widget = form.querySelector('.star-rating');
+    if (!widget) return;
+    widget.addEventListener('rating-change', () => form.submit());
+  });
+
+  const playBtn = document.querySelector('.film-cover__play');
+  const modal = document.getElementById('filmTrailerModal');
+  const frameHost = document.getElementById('filmTrailerFrame');
+  if (!playBtn || !modal || !frameHost) return;
+
+  function youtubeEmbedUrl(url) {
+    if (!url) return null;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname.includes('youtu.be')) {
+        return 'https://www.youtube.com/embed/' + parsed.pathname.replace(/^\//, '') + '?autoplay=1&rel=0';
+      }
+      const id = parsed.searchParams.get('v');
+      if (id) return 'https://www.youtube.com/embed/' + id + '?autoplay=1&rel=0';
+    } catch (err) {
+      return null;
+    }
+    return null;
+  }
+
+  function closeModal() {
+    modal.hidden = true;
+    frameHost.innerHTML = '';
+    document.body.style.overflow = '';
+  }
+
+  function openModal(url) {
+    const embed = youtubeEmbedUrl(url);
+    if (embed) {
+      frameHost.innerHTML = '<iframe src="' + embed + '" title="Trailer" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
+      modal.hidden = false;
+      document.body.style.overflow = 'hidden';
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  playBtn.addEventListener('click', function () {
+    openModal(playBtn.dataset.trailerUrl);
+  });
+
+  modal.querySelectorAll('[data-trailer-close]').forEach(function (el) {
+    el.addEventListener('click', closeModal);
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !modal.hidden) closeModal();
   });
 })();
 </script>

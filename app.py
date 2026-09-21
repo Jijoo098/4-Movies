@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 import threading
 import requests
@@ -12,6 +13,7 @@ from werkzeug.utils import secure_filename
 import os
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
 from sqlalchemy import func, text
+from urllib.parse import quote_plus
 
 # ------------------ Configuration ------------------ #
 def _load_env_file():
@@ -47,8 +49,12 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = 'your_secret_key'
 app.config['UPLOAD_FOLDER'] = 'static/profile_pics'
 app.config['STACK_BANNER_FOLDER'] = 'static/stack_banners'
-app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # 5MB max (banners)
+app.config['COMMUNITY_MEDIA_FOLDER'] = 'static/community_media'
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB (community video uploads)
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+COMMUNITY_IMAGE_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+COMMUNITY_VIDEO_EXTENSIONS = {'mp4', 'webm', 'mov'}
+COMMUNITY_MEDIA_EXTENSIONS = COMMUNITY_IMAGE_EXTENSIONS | COMMUNITY_VIDEO_EXTENSIONS
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
@@ -69,6 +75,81 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def allowed_community_media(filename):
+    if not filename or '.' not in filename:
+        return False
+    return filename.rsplit('.', 1)[1].lower() in COMMUNITY_MEDIA_EXTENSIONS
+
+
+def community_media_type(filename):
+    ext = filename.rsplit('.', 1)[1].lower()
+    if ext in COMMUNITY_VIDEO_EXTENSIONS:
+        return 'video'
+    if ext in COMMUNITY_IMAGE_EXTENSIONS:
+        return 'image'
+    return None
+
+
+def delete_community_media_file(media_url):
+    if not media_url or 'community_media/' not in media_url:
+        return
+    filename = media_url.rsplit('community_media/', 1)[-1].split('?')[0]
+    filepath = os.path.join(app.config['COMMUNITY_MEDIA_FOLDER'], filename)
+    if os.path.isfile(filepath):
+        try:
+            os.remove(filepath)
+        except OSError:
+            pass
+
+
+def purge_community_seed_data():
+    """Remove development seed posts so the feed only shows real user content."""
+    seed_posts = CommunityPost.query.filter_by(is_seed=True).all()
+    if not seed_posts:
+        return 0
+
+    seed_ids = [post.id for post in seed_posts]
+    CommunityPostLike.query.filter(CommunityPostLike.post_id.in_(seed_ids)).delete(
+        synchronize_session=False,
+    )
+    CommunitySavedPost.query.filter(CommunitySavedPost.post_id.in_(seed_ids)).delete(
+        synchronize_session=False,
+    )
+
+    cleanup_tables = (
+        'community_comment',
+        'community_repost',
+        'community_poll_vote',
+        'community_poll_option',
+        'community_poll',
+        'community_notification',
+    )
+    with db.engine.connect() as conn:
+        for table in cleanup_tables:
+            try:
+                conn.execute(
+                    text(f'DELETE FROM {table} WHERE post_id IN :ids'),
+                    {'ids': tuple(seed_ids)},
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+    for post in seed_posts:
+        delete_community_media_file(post.media_url)
+        db.session.delete(post)
+
+    db.session.commit()
+    return len(seed_ids)
+
+
+def community_posts_query():
+    """Community posts created by real users (exclude development seed rows)."""
+    return CommunityPost.query.filter(
+        db.or_(CommunityPost.is_seed.is_(False), CommunityPost.is_seed.is_(None)),
+    )
+
+
 def _tmdb_cache_key(path, params):
     items = tuple(sorted((str(k), str(v)) for k, v in params.items() if k != 'api_key'))
     return (path, items)
@@ -80,7 +161,11 @@ def tmdb_get(path, ttl=None, **params):
         return None
     params = dict(params)
     if ttl is None:
-        ttl = _TMDB_DETAIL_TTL if path.startswith('/movie/') or path.startswith('/person/') else _TMDB_CACHE_TTL
+        ttl = (
+            _TMDB_DETAIL_TTL
+            if path.startswith('/movie/') or path.startswith('/person/') or path.startswith('/tv/')
+            else _TMDB_CACHE_TTL
+        )
     key = _tmdb_cache_key(path, params)
     now = datetime.utcnow()
     with _TMDB_CACHE_LOCK:
@@ -131,6 +216,63 @@ def tmdb_poster_url(poster_path, size='w500'):
     if poster_path.startswith('http'):
         return poster_path
     return f"https://image.tmdb.org/t/p/{size}{poster_path}"
+
+
+def pick_youtube_trailer(videos):
+    """Pick the best YouTube clip from a TMDB videos payload."""
+    results = (videos or {}).get('results') or []
+    youtube = [clip for clip in results if clip.get('site') == 'YouTube' and clip.get('key')]
+    if not youtube:
+        return None
+
+    type_rank = {
+        'Trailer': 0,
+        'Teaser': 1,
+        'Clip': 2,
+        'Featurette': 3,
+        'Behind the Scenes': 4,
+    }
+
+    def sort_key(clip):
+        official = 0 if clip.get('official') else 1
+        return (official, type_rank.get(clip.get('type') or '', 9))
+
+    youtube.sort(key=sort_key)
+    return f"https://www.youtube.com/watch?v={youtube[0]['key']}"
+
+
+def youtube_trailer_search_url(title, year=None):
+    parts = [title or '', str(year) if year and str(year) != 'N/A' else '', 'official trailer']
+    query = ' '.join(part for part in parts if part).strip()
+    return f"https://www.youtube.com/results?search_query={quote_plus(query)}"
+
+
+def fetch_tmdb_videos(media_type, tmdb_id):
+    """Collect videos across language variants so trailers are less often missed."""
+    if not tmdb_id or media_type not in ('movie', 'tv'):
+        return {'results': []}
+    collected = []
+    seen_keys = set()
+    for params in ({'language': 'en-US'}, {}):
+        payload = tmdb_get(f'/{media_type}/{tmdb_id}/videos', **params) or {}
+        for clip in payload.get('results') or []:
+            key = clip.get('key')
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            collected.append(clip)
+    return {'results': collected}
+
+
+def resolve_trailer_url(media_type, tmdb_id, title, year, videos=None):
+    """Always return a trailer URL: TMDB YouTube clip, or YouTube search fallback."""
+    url = pick_youtube_trailer(videos)
+    if url:
+        return url
+    url = pick_youtube_trailer(fetch_tmdb_videos(media_type, tmdb_id))
+    if url:
+        return url
+    return youtube_trailer_search_url(title, year)
 
 
 def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
@@ -211,11 +353,13 @@ def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
             if len(crew) >= 12:
                 break
 
-    trailer_url = None
-    for clip in ((videos or data.get('videos') or {}).get('results') or []):
-        if clip.get('site') == 'YouTube' and clip.get('type') in ('Trailer', 'Teaser') and clip.get('key'):
-            trailer_url = f"https://www.youtube.com/watch?v={clip['key']}"
-            break
+    trailer_url = resolve_trailer_url(
+        'movie',
+        str(data['id']),
+        data.get('title') or data.get('original_title') or 'Untitled',
+        year,
+        videos or data.get('videos'),
+    )
 
     similar = []
     for item in ((recommendations or data.get('recommendations') or {}).get('results') or [])[:10]:
@@ -247,6 +391,7 @@ def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
         'Year': year,
         'ReleaseDate': release,
         'ReleaseLabel': release_label,
+        'Status': data.get('status') or '',
         'Poster': tmdb_poster_url(data.get('poster_path')),
         'Plot': data.get('overview') or 'No plot available.',
         'Genre': genre_names,
@@ -263,9 +408,10 @@ def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
     }
 
 
-def fetch_watch_providers(tmdb_id, regions=('IN', 'US')):
+def fetch_watch_providers(tmdb_id, regions=('IN', 'US'), media_type='movie'):
     """OTT / rent / buy availability from TMDB (JustWatch). Prefer India, then US."""
-    data = tmdb_get(f'/movie/{tmdb_id}/watch/providers')
+    path_type = 'tv' if media_type == 'tv' else 'movie'
+    data = tmdb_get(f'/{path_type}/{tmdb_id}/watch/providers')
     if not data:
         return None
 
@@ -277,6 +423,8 @@ def fetch_watch_providers(tmdb_id, regions=('IN', 'US')):
         return {
             'region': None,
             'stream': [],
+            'free': [],
+            'ads': [],
             'rent': [],
             'buy': [],
             'link': None,
@@ -297,10 +445,47 @@ def fetch_watch_providers(tmdb_id, regions=('IN', 'US')):
     return {
         'region': region,
         'stream': map_providers(block.get('flatrate')),
+        'free': map_providers(block.get('free')),
+        'ads': map_providers(block.get('ads')),
         'rent': map_providers(block.get('rent')),
         'buy': map_providers(block.get('buy')),
         'link': block.get('link'),
     }
+
+
+def build_watch_online_cards(watch_providers, limit=8):
+    """Flatten TMDB watch providers into card rows for the Watch Online UI."""
+    if not watch_providers:
+        return []
+
+    link = watch_providers.get('link') or '#'
+    buckets = (
+        ('stream', 'Subscription'),
+        ('free', 'Free'),
+        ('ads', 'Free with ads'),
+        ('rent', 'Rent'),
+        ('buy', 'Buy'),
+    )
+    seen = set()
+    cards = []
+    for key, label in buckets:
+        for provider in watch_providers.get(key) or []:
+            name = (provider.get('name') or '').strip()
+            if not name:
+                continue
+            key_name = name.lower()
+            if key_name in seen:
+                continue
+            seen.add(key_name)
+            cards.append({
+                'name': name,
+                'logo': provider.get('logo'),
+                'label': label,
+                'url': link,
+            })
+            if len(cards) >= limit:
+                return cards
+    return cards
 
 
 # Preferred JustWatch regions when looking up OTT logos for a language.
@@ -331,9 +516,9 @@ LANG_WATCH_REGIONS = {
 }
 
 
-def fetch_stream_logos(tmdb_id, regions=('IN', 'US'), limit=4):
+def fetch_stream_logos(tmdb_id, regions=('IN', 'US'), limit=4, media_type='movie'):
     """Compact stream-only provider logos for schedule OTT cards."""
-    info = fetch_watch_providers(tmdb_id, regions=regions)
+    info = fetch_watch_providers(tmdb_id, regions=regions, media_type=media_type)
     if not info:
         return []
     logos = []
@@ -355,7 +540,8 @@ def attach_ott_logos(cards, lang_code=None, max_cards=16):
     subset = list(cards[:max_cards])
 
     def one(card):
-        card['ott_logos'] = fetch_stream_logos(card.get('id'), regions=regions)
+        media = 'tv' if (card.get('media') or card.get('media_type')) == 'tv' else 'movie'
+        card['ott_logos'] = fetch_stream_logos(card.get('id'), regions=regions, media_type=media)
         return card
 
     if len(subset) == 1:
@@ -377,24 +563,27 @@ def fetch_movie_by_id(tmdb_id):
     # Heavy append_to_response can fail intermittently — fall back to separate calls
     if not data:
         data = tmdb_get(f'/movie/{tmdb_id}')
-        if not data:
-            return None
+    if not data:
+        return None
+
+    credits = data.get('credits')
+    videos = data.get('videos')
+    recommendations = data.get('recommendations')
+    if not credits or not videos or not recommendations:
         extras = tmdb_get_many([
             (f'/movie/{tmdb_id}/credits', {}),
             (f'/movie/{tmdb_id}/videos', {}),
             (f'/movie/{tmdb_id}/recommendations', {}),
         ])
-        return normalize_tmdb_movie(
-            data,
-            credits=extras[0] or {},
-            videos=extras[1] or {},
-            recommendations=extras[2] or {},
-        )
+        credits = credits or extras[0] or {}
+        videos = videos or extras[1] or {}
+        recommendations = recommendations or extras[2] or {}
+
     return normalize_tmdb_movie(
         data,
-        credits=data.get('credits'),
-        videos=data.get('videos'),
-        recommendations=data.get('recommendations'),
+        credits=credits,
+        videos=videos,
+        recommendations=recommendations,
     )
 
 
@@ -529,6 +718,171 @@ def search_tmdb_movies(query, limit=8):
     return movies
 
 
+def search_tmdb_series(query, limit=12):
+    """Search TMDB TV shows only — same shape as film search results."""
+    if not query:
+        return []
+    data = tmdb_get('/search/tv', query=query, include_adult='false')
+    if not data:
+        return []
+    shows = []
+    for item in data.get('results', [])[:limit]:
+        first_air = item.get('first_air_date') or ''
+        vote = item.get('vote_average')
+        tmdb_id = str(item['id'])
+        shows.append({
+            'Title': item.get('name') or item.get('original_name') or 'Untitled',
+            'Year': first_air[:4] if first_air else 'N/A',
+            'Poster': tmdb_poster_url(item.get('poster_path')),
+            'Plot': item.get('overview') or '',
+            'Genre': 'TV Series',
+            'Runtime': 'N/A',
+            'FirstAir': first_air if first_air else 'N/A',
+            'imdbRating': f"{vote:.1f}" if isinstance(vote, (int, float)) else 'N/A',
+            'imdbID': tmdb_id,
+            'tmdb_id': tmdb_id,
+        })
+    return shows
+
+
+def normalize_tmdb_tv(data):
+    """Map TMDB TV JSON into a template-friendly shape."""
+    if not data or not data.get('id'):
+        return None
+
+    first_air = data.get('first_air_date') or ''
+    year = first_air[:4] if first_air else 'N/A'
+    genre_names = ', '.join(
+        g.get('name', '') for g in (data.get('genres') or []) if g.get('name')
+    ) or 'N/A'
+
+    seasons = []
+    for season in data.get('seasons') or []:
+        season_number = season.get('season_number')
+        if season_number is None or season_number < 1:
+            continue
+        seasons.append({
+            'number': season_number,
+            'name': season.get('name') or f'Season {season_number}',
+            'episode_count': season.get('episode_count') or 0,
+            'poster': tmdb_poster_url(season.get('poster_path')) if season.get('poster_path') else None,
+        })
+
+    vote = data.get('vote_average')
+    tmdb_id = str(data['id'])
+    next_ep = data.get('next_episode_to_air') or {}
+
+    trailer_url = resolve_trailer_url(
+        'tv',
+        tmdb_id,
+        data.get('name') or data.get('original_name') or 'Untitled',
+        year,
+        data.get('videos'),
+    )
+
+    return {
+        'Title': data.get('name') or data.get('original_name') or 'Untitled',
+        'Year': year,
+        'FirstAirDate': first_air,
+        'NextAirDate': next_ep.get('air_date') or '',
+        'Poster': tmdb_poster_url(data.get('poster_path')),
+        'Backdrop': tmdb_poster_url(data.get('backdrop_path'), size='original') if data.get('backdrop_path') else None,
+        'Plot': data.get('overview') or 'No overview available.',
+        'Genre': genre_names,
+        'imdbRating': f"{vote:.1f}" if isinstance(vote, (int, float)) else 'N/A',
+        'tmdb_id': tmdb_id,
+        'number_of_seasons': data.get('number_of_seasons') or len(seasons),
+        'seasons': seasons,
+        'status': data.get('status') or '',
+        'Trailer': trailer_url,
+    }
+
+
+def fetch_tv_by_id(tmdb_id):
+    if not tmdb_id:
+        return None
+    data = tmdb_get(
+        f'/tv/{tmdb_id}',
+        append_to_response='videos',
+        language='en-US',
+    )
+    if not data:
+        data = tmdb_get(f'/tv/{tmdb_id}', append_to_response='videos')
+    if not data:
+        data = tmdb_get(f'/tv/{tmdb_id}')
+    if not data:
+        return None
+    # If videos were missing from the primary payload, fetch them separately
+    if not (data.get('videos') or {}).get('results'):
+        videos = tmdb_get(f'/tv/{tmdb_id}/videos', language='en-US') or tmdb_get(f'/tv/{tmdb_id}/videos')
+        if videos:
+            data['videos'] = videos
+    return normalize_tmdb_tv(data)
+
+
+def fetch_tv_season(tmdb_id, season_number):
+    data = tmdb_get(f'/tv/{tmdb_id}/season/{season_number}', language='en-US')
+    if not data:
+        return None
+    episodes = []
+    for item in data.get('episodes') or []:
+        ep_num = item.get('episode_number')
+        if ep_num is None:
+            continue
+        air = item.get('air_date') or ''
+        episodes.append({
+            'number': ep_num,
+            'title': item.get('name') or f'Episode {ep_num}',
+            'overview': (item.get('overview') or '')[:220],
+            'air_date': air,
+            'air_label': _format_schedule_date(air) if air else 'TBA',
+            'still': tmdb_poster_url(item.get('still_path')) if item.get('still_path') else None,
+            'vote_average': item.get('vote_average'),
+        })
+    return {
+        'number': season_number,
+        'name': data.get('name') or f'Season {season_number}',
+        'episodes': episodes,
+    }
+
+
+def fetch_series_catalog(limit=24):
+    """Popular, trending, and on-air TV for the Series browse page."""
+    payloads = tmdb_get_many([
+        ('/trending/tv/week', {'language': 'en-US'}),
+        ('/tv/popular', {'language': 'en-US', 'page': 1}),
+        ('/tv/on_the_air', {'language': 'en-US', 'page': 1}),
+    ])
+    cards = []
+    seen = set()
+    for payload in payloads:
+        for item in (payload or {}).get('results') or []:
+            tid = str(item.get('id'))
+            if not tid or tid in seen:
+                continue
+            seen.add(tid)
+            cards.append(_schedule_card(item, kind='ott', media='tv'))
+    cards.sort(key=lambda c: (-c['popularity'], c['title']))
+    return cards[:limit]
+
+
+def user_episode_ratings(user_id, series_tmdb_id):
+    if not user_id:
+        return {}
+    rows = EpisodeRating.query.filter_by(
+        user_id=user_id,
+        series_tmdb_id=str(series_tmdb_id),
+    ).all()
+    return {(row.season_number, row.episode_number): row.rating for row in rows}
+
+
+def user_series_overall_rating(user_id, series_tmdb_id):
+    ratings = list(user_episode_ratings(user_id, series_tmdb_id).values())
+    if not ratings:
+        return None, 0
+    return round(sum(ratings) / len(ratings), 1), len(ratings)
+
+
 def _parse_release_date(value):
     if not value:
         return None
@@ -545,6 +899,285 @@ def _format_schedule_date(value):
     return parsed.strftime('%b %d, %Y')
 
 
+UPCOMING_MOVIE_STATUSES = {
+    'rumored', 'planned', 'in production', 'post production',
+}
+UPCOMING_SERIES_STATUSES = {
+    'planned', 'in production', 'returning series', 'pilot',
+}
+RELEASED_MOVIE_STATUSES = {'released', 'canceled'}
+ENDED_SERIES_STATUSES = {'ended', 'canceled', 'cancelled'}
+
+
+def get_upcoming_catalog_index():
+    """Cached TMDB ids for titles in the release schedule / upcoming lists."""
+    cached = getattr(get_upcoming_catalog_index, '_cache', None)
+    now = datetime.utcnow()
+    if cached and (now - cached['at']).total_seconds() < 1800:
+        return cached['data']
+
+    movies = set()
+    tv = set()
+
+    try:
+        schedule = fetch_release_schedule()
+        for key in ('upcoming', 'ott_upcoming', 'announced', 'ott_announced', 'tv_upcoming', 'tv_announced'):
+            for card in schedule.get(key) or []:
+                media = card.get('media') or 'movie'
+                item_id = str(card.get('id') or '')
+                if not item_id:
+                    continue
+                if media == 'tv':
+                    tv.add(item_id)
+                else:
+                    movies.add(item_id)
+    except Exception:
+        pass
+
+    if TMDB_API_KEY:
+        today_iso = date.today().isoformat()
+        for page in range(1, 5):
+            payload = tmdb_get(
+                '/discover/movie',
+                language='en-US',
+                sort_by='popularity.desc',
+                **{'primary_release_date.gte': today_iso, 'page': page},
+            )
+            for item in (payload or {}).get('results') or []:
+                if item.get('id'):
+                    movies.add(str(item['id']))
+
+        for page in (1, 2, 3):
+            payload = tmdb_get('/movie/upcoming', language='en-US', page=page)
+            for item in (payload or {}).get('results') or []:
+                if item.get('id'):
+                    movies.add(str(item['id']))
+
+        for page in range(1, 4):
+            payload = tmdb_get(
+                '/discover/tv',
+                language='en-US',
+                sort_by='popularity.desc',
+                **{'first_air_date.gte': today_iso, 'page': page},
+            )
+            for item in (payload or {}).get('results') or []:
+                if item.get('id'):
+                    tv.add(str(item['id']))
+
+    index = {'movie': movies, 'tv': tv}
+    get_upcoming_catalog_index._cache = {'at': now, 'data': index}
+    return index
+
+
+def is_in_upcoming_catalog(tmdb_id, media_type):
+    if not tmdb_id:
+        return False
+    index = get_upcoming_catalog_index()
+    bucket_key = 'tv' if media_type == 'tv' else 'movie'
+    return str(tmdb_id) in index.get(bucket_key, set())
+
+
+def is_upcoming_movie(movie, tmdb_id=None):
+    """True when the film has not released yet."""
+    if not movie:
+        return False
+
+    tmdb_id = str(tmdb_id or movie.get('tmdb_id') or movie.get('imdbID') or '')
+    today = date.today()
+
+    status = (movie.get('Status') or '').strip().lower()
+    if status == 'canceled':
+        return False
+
+    release = _parse_release_date(movie.get('ReleaseDate'))
+    if release:
+        return release >= today
+
+    if status in RELEASED_MOVIE_STATUSES:
+        return False
+    if status in UPCOMING_MOVIE_STATUSES:
+        return True
+
+    if tmdb_id and is_in_upcoming_catalog(tmdb_id, 'movie'):
+        return True
+
+    year = movie.get('Year')
+    if year and year != 'N/A':
+        try:
+            year_num = int(year)
+            if year_num > today.year:
+                return True
+            if year_num >= today.year and not release:
+                if status in UPCOMING_MOVIE_STATUSES:
+                    return True
+                if tmdb_id and is_in_upcoming_catalog(tmdb_id, 'movie'):
+                    return True
+        except (TypeError, ValueError):
+            pass
+
+    return False
+
+
+def is_upcoming_series(show, tmdb_id=None):
+    """True when the series is planned, in production, or has future air dates."""
+    if not show:
+        return False
+
+    tmdb_id = str(tmdb_id or show.get('tmdb_id') or '')
+    today = date.today()
+    status = (show.get('status') or '').strip().lower()
+
+    if status in ENDED_SERIES_STATUSES:
+        return False
+
+    if status in UPCOMING_SERIES_STATUSES:
+        first_air = _parse_release_date(show.get('FirstAirDate'))
+        next_air = _parse_release_date(show.get('NextAirDate'))
+        if status in ('planned', 'in production', 'pilot'):
+            return True
+        if next_air and next_air >= today:
+            return True
+        if first_air and first_air >= today:
+            return True
+        if tmdb_id and is_in_upcoming_catalog(tmdb_id, 'tv'):
+            return True
+
+    first_air = _parse_release_date(show.get('FirstAirDate'))
+    if first_air and first_air >= today:
+        return True
+
+    next_air = _parse_release_date(show.get('NextAirDate'))
+    if next_air and next_air >= today:
+        return True
+
+    if tmdb_id and is_in_upcoming_catalog(tmdb_id, 'tv'):
+        return True
+
+    year = show.get('Year')
+    if year and year != 'N/A':
+        try:
+            if int(year) > today.year:
+                return True
+        except (TypeError, ValueError):
+            pass
+
+    return False
+
+
+def resolve_upcoming_movie(movie, tmdb_id):
+    """Best-effort upcoming check with a TMDB refresh if the cached payload is thin."""
+    if is_upcoming_movie(movie, tmdb_id=tmdb_id):
+        return True
+    if not TMDB_API_KEY or not tmdb_id:
+        return False
+    raw = tmdb_get(f'/movie/{tmdb_id}')
+    if not raw:
+        return False
+    if raw.get('status'):
+        movie['Status'] = raw.get('status')
+    if raw.get('release_date'):
+        movie['ReleaseDate'] = raw.get('release_date')
+        try:
+            movie['Year'] = raw['release_date'][:4]
+        except (TypeError, IndexError):
+            pass
+    return is_upcoming_movie(movie, tmdb_id=tmdb_id)
+
+
+def resolve_upcoming_series(show, tmdb_id):
+    """Best-effort upcoming check with a TMDB refresh if the cached payload is thin."""
+    if is_upcoming_series(show, tmdb_id=tmdb_id):
+        return True
+    if not TMDB_API_KEY or not tmdb_id:
+        return False
+    raw = tmdb_get(f'/tv/{tmdb_id}')
+    if not raw:
+        return False
+    if raw.get('status'):
+        show['status'] = raw.get('status')
+    if raw.get('first_air_date'):
+        show['FirstAirDate'] = raw.get('first_air_date')
+    next_ep = raw.get('next_episode_to_air') or {}
+    if next_ep.get('air_date'):
+        show['NextAirDate'] = next_ep.get('air_date')
+    return is_upcoming_series(show, tmdb_id=tmdb_id)
+
+
+def format_fan_count(count):
+    """Compact fan count label, e.g. 8200 -> 8.2K."""
+    count = int(count or 0)
+    if count >= 1_000_000:
+        label = f'{count / 1_000_000:.1f}M'
+        return label.replace('.0M', 'M')
+    if count >= 1000:
+        label = f'{count / 1000:.1f}K'
+        return label.replace('.0K', 'K')
+    return str(count)
+
+
+def build_cant_miss_context(media_type, tmdb_id, viewer_id=None):
+    """Fan count, avatars, and viewer state for the Can't Miss widget."""
+    media_type = (media_type or '').strip().lower()
+    tmdb_id = str(tmdb_id or '')
+    if media_type not in ('movie', 'tv') or not tmdb_id:
+        return None
+
+    fan_count = CantMissFan.query.filter_by(
+        media_type=media_type,
+        tmdb_id=tmdb_id,
+    ).count()
+
+    marked_by_me = False
+    if viewer_id:
+        marked_by_me = CantMissFan.query.filter_by(
+            user_id=viewer_id,
+            media_type=media_type,
+            tmdb_id=tmdb_id,
+        ).first() is not None
+
+    recent_rows = (
+        CantMissFan.query.filter_by(media_type=media_type, tmdb_id=tmdb_id)
+        .order_by(CantMissFan.created_at.desc())
+        .limit(3)
+        .all()
+    )
+    avatars = []
+    for row in recent_rows:
+        user = row.user
+        if not user:
+            continue
+        pic = user.profile_pic if user.profile_pic and user.profile_pic != 'default.jpg' else None
+        avatars.append({
+            'initial': user.username[:1].upper(),
+            'pic': pic,
+            'mock': False,
+        })
+
+    mock_palette = (
+        ('F', 32),
+        ('M', 12),
+        ('C', 280),
+    )
+    seed = sum(ord(ch) for ch in tmdb_id) or 42
+    idx = 0
+    while len(avatars) < 3:
+        label, hue = mock_palette[(seed + idx) % len(mock_palette)]
+        avatars.append({
+            'initial': label,
+            'pic': None,
+            'mock': True,
+            'hue': hue + (idx * 18),
+        })
+        idx += 1
+
+    return {
+        'fan_count': fan_count,
+        'fan_count_label': format_fan_count(fan_count),
+        'marked_by_me': marked_by_me,
+        'avatars': avatars,
+    }
+
+
 def group_diary_by_month(entries):
     """Group diary entries into month sections for the diary page."""
     groups = {}
@@ -559,6 +1192,134 @@ def group_diary_by_month(entries):
             order.append(key)
         groups[key]['entries'].append(entry)
     return [groups[key] for key in order]
+
+
+def time_ago(value):
+    """Short relative timestamp for community cards."""
+    if not value:
+        return ''
+    now = datetime.utcnow()
+    dt = value if isinstance(value, datetime) else datetime.combine(value, datetime.min.time())
+    seconds = max(0, int((now - dt).total_seconds()))
+    if seconds < 60:
+        return 'just now'
+    minutes = seconds // 60
+    if minutes < 60:
+        return f'{minutes}m'
+    hours = minutes // 60
+    if hours < 24:
+        return f'{hours}h'
+    days = hours // 24
+    if days < 7:
+        return f'{days}d'
+    return dt.strftime('%b %d, %Y')
+
+
+def build_community_feed(viewer_id=None, feed_filter='for-you', limit=50):
+    """User community posts with sidebar filters."""
+    liked_ids = set()
+    saved_ids = set()
+    if viewer_id:
+        liked_ids = {
+            row.post_id for row in CommunityPostLike.query.filter_by(user_id=viewer_id).all()
+        }
+        saved_ids = {
+            row.post_id for row in CommunitySavedPost.query.filter_by(user_id=viewer_id).all()
+        }
+
+    like_counts = dict(
+        db.session.query(CommunityPostLike.post_id, func.count(CommunityPostLike.id))
+        .group_by(CommunityPostLike.post_id)
+        .all()
+    )
+
+    if feed_filter == 'reviews':
+        return []
+
+    if feed_filter == 'following':
+        if not viewer_id:
+            return []
+        viewer = User.query.get(viewer_id)
+        followed_ids = [user.id for user in viewer.followed.all()] if viewer else []
+        if not followed_ids:
+            return []
+        posts = community_posts_query().filter(
+            CommunityPost.user_id.in_(followed_ids),
+        ).order_by(CommunityPost.created_at.desc()).limit(limit).all()
+    elif feed_filter == 'my-posts':
+        if not viewer_id:
+            return []
+        posts = community_posts_query().filter_by(
+            user_id=viewer_id,
+        ).order_by(CommunityPost.created_at.desc()).limit(limit).all()
+    elif feed_filter == 'saved':
+        if not viewer_id or not saved_ids:
+            return []
+        posts = community_posts_query().filter(
+            CommunityPost.id.in_(saved_ids),
+        ).order_by(CommunityPost.created_at.desc()).limit(limit).all()
+    else:
+        posts = community_posts_query().order_by(
+            CommunityPost.created_at.desc(),
+        ).limit(limit * 2).all()
+        if feed_filter == 'trending':
+            posts.sort(
+                key=lambda post: like_counts.get(post.id, 0),
+                reverse=True,
+            )
+            posts = posts[:limit]
+        else:
+            posts = posts[:limit]
+
+    feed = []
+    for post in posts:
+        feed.append({
+            'id': post.id,
+            'user': post.author,
+            'content': post.content,
+            'media_url': post.media_url,
+            'media_type': post.media_type,
+            'created_at': post.created_at,
+            'time_label': time_ago(post.created_at),
+            'likes': like_counts.get(post.id, 0),
+            'liked_by_me': post.id in liked_ids,
+            'saved_by_me': post.id in saved_ids,
+        })
+    return feed
+
+
+def user_series_diary_entries(user_id):
+    """Build month-groupable diary cards from a user's episode ratings."""
+    rows = EpisodeRating.query.filter_by(user_id=user_id).order_by(
+        EpisodeRating.updated_at.desc()
+    ).all()
+    grouped = {}
+    for row in rows:
+        sid = str(row.series_tmdb_id)
+        bucket = grouped.setdefault(sid, {'ratings': [], 'last_at': row.updated_at})
+        bucket['ratings'].append(row.rating)
+        if row.updated_at and (not bucket['last_at'] or row.updated_at > bucket['last_at']):
+            bucket['last_at'] = row.updated_at
+
+    entries = []
+    for sid, data in grouped.items():
+        show = fetch_tv_by_id(sid)
+        ratings = data['ratings']
+        overall = round(sum(ratings) / len(ratings), 1) if ratings else None
+        last_at = data['last_at']
+        watched_date = last_at.date() if last_at else date.today()
+        entries.append(SimpleNamespace(
+            series_tmdb_id=sid,
+            title=show['Title'] if show else f'Series {sid}',
+            poster_url=show['Poster'] if show else None,
+            rating=overall,
+            episode_count=len(ratings),
+            watched_date=watched_date,
+            is_series=True,
+        ))
+
+    entries.sort(key=lambda item: item.watched_date, reverse=True)
+    return entries
 
 
 def _schedule_card(item, release_date=None, regions=None, kind='theatrical', media='movie'):
@@ -829,8 +1590,8 @@ def fetch_discover_releases(
     for page in range(1, pages + 1):
         params = {
             'with_release_type': release_types,
-            'release_date.gte': date_gte.isoformat(),
-            'release_date.lte': date_lte.isoformat(),
+                'release_date.gte': date_gte.isoformat(),
+                'release_date.lte': date_lte.isoformat(),
             'sort_by': sort_by,
             'include_adult': 'false',
             'include_video': 'false',
@@ -1284,6 +2045,53 @@ def upsert_diary_for_rating(user_id, title, poster, imdb_id, rating, review=None
     return entry
 
 
+def user_profile_stats(user_id):
+    """Accurate per-user counts for profile headers (not limited list lengths)."""
+    return {
+        'review_count': Post.query.filter_by(user_id=user_id).count(),
+        'watched_count': WatchedFilm.query.filter_by(user_id=user_id).count(),
+        'like_count': FilmLike.query.filter_by(user_id=user_id).count(),
+        'diary_count': DiaryEntry.query.filter_by(user_id=user_id).count(),
+    }
+
+
+def sync_user_film_logs(user_id):
+    """Backfill this user's diary + watched rows from their reviews. Never touches other users."""
+    posts = Post.query.filter_by(user_id=user_id).order_by(Post.created_at.asc()).all()
+    for post in posts:
+        if not post.rating:
+            continue
+        review_text = post.content or ''
+        if review_text.startswith('Rated '):
+            review_text = ''
+        watched_on = post.created_at.date() if post.created_at else date.today()
+        upsert_diary_for_rating(
+            user_id=user_id,
+            title=post.movie,
+            poster=poster_or_placeholder(post.poster_url),
+            imdb_id=post.imdb_id,
+            rating=post.rating,
+            review=review_text or None,
+            watched_date=watched_on,
+        )
+
+    entries = DiaryEntry.query.filter_by(user_id=user_id).all()
+    for entry in entries:
+        film_id = str(entry.imdb_id) if entry.imdb_id else None
+        if not film_id:
+            continue
+        if WatchedFilm.query.filter_by(user_id=user_id, tmdb_id=film_id).first():
+            continue
+        db.session.add(WatchedFilm(
+            user_id=user_id,
+            tmdb_id=film_id,
+            title=entry.title,
+            poster_url=entry.poster_url,
+        ))
+
+    db.session.commit()
+
+
 def render_view(view, **context):
     """Render the single combined template for a named view."""
     return render_template('app.html', view=view, **context)
@@ -1293,6 +2101,7 @@ def ensure_schema():
     """Create tables and add columns introduced after the first release."""
     db.create_all()
     os.makedirs(app.config['STACK_BANNER_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['COMMUNITY_MEDIA_FOLDER'], exist_ok=True)
     alterations = [
         ("diary_entry", "imdb_id", "VARCHAR(20)"),
         ("diary_entry", "is_rewatch", "BOOLEAN DEFAULT 0"),
@@ -1304,6 +2113,9 @@ def ensure_schema():
         ("movie_list", "banner_url", "VARCHAR(300)"),
         ("movie_list", "updated_at", "DATETIME"),
         ("movie_list", "is_public", "BOOLEAN DEFAULT 0"),
+        ("community_post", "media_url", "VARCHAR(300)"),
+        ("community_post", "media_type", "VARCHAR(10)"),
+        ("community_post", "is_seed", "BOOLEAN DEFAULT 0"),
     ]
     with db.engine.connect() as conn:
         for table, column, coltype in alterations:
@@ -1312,6 +2124,7 @@ def ensure_schema():
                 conn.commit()
             except Exception:
                 conn.rollback()
+    purge_community_seed_data()
 
 
 def relative_stack_updated(when):
@@ -1460,6 +2273,53 @@ class Comment(db.Model):
     post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
 
 
+class CommunityPost(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False, default='')
+    media_url = db.Column(db.String(300))
+    media_type = db.Column(db.String(10))
+    is_seed = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    author = db.relationship('User', backref=db.backref('community_posts', lazy=True))
+
+
+class CommunityPostLike(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('community_post.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('user_id', 'post_id', name='uq_community_post_like'),)
+
+
+class CommunitySavedPost(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('community_post.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('user_id', 'post_id', name='uq_community_saved_post'),)
+
+
+class CantMissFan(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    media_type = db.Column(db.String(10), nullable=False)
+    tmdb_id = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    user = db.relationship('User', backref=db.backref('cant_miss_marks', lazy=True))
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'media_type', 'tmdb_id', name='uq_cant_miss_fan'),
+    )
+
+
+class PostLike(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    post_id = db.Column(db.Integer, db.ForeignKey('post.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint('user_id', 'post_id', name='uq_post_like'),)
+
+
 class DiaryEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
@@ -1538,6 +2398,23 @@ class WatchedFilm(db.Model):
     title = db.Column(db.String(200), nullable=False)
     poster_url = db.Column(db.String(300))
     watched_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class EpisodeRating(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    series_tmdb_id = db.Column('tv_id', db.String(20), nullable=False)
+    season_number = db.Column(db.Integer, nullable=False)
+    episode_number = db.Column(db.Integer, nullable=False)
+    rating = db.Column(db.Integer, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            'user_id', 'tv_id', 'season_number', 'episode_number',
+            name='uq_episode_rating',
+        ),
+    )
 
 
 def get_popular_movies(limit=12):
@@ -1703,6 +2580,139 @@ def fetch_weekly_trending_movies(limit=16):
     return movies[:limit]
 
 
+def fetch_weekly_trending_series(limit=16):
+    """Hero banner: trending and newly aired TV, India-first mix."""
+    today = date.today()
+    cached = getattr(fetch_weekly_trending_series, '_cache', None)
+    now = datetime.utcnow()
+    if (
+        cached
+        and cached.get('as_of') == today
+        and cached.get('data')
+        and (now - cached['at']).total_seconds() < 1800
+    ):
+        return cached['data'][:limit]
+
+    week_gte = (today - timedelta(days=7)).isoformat()
+    week_lte = (today + timedelta(days=14)).isoformat()
+    recent_gte = (today - timedelta(days=60)).isoformat()
+    indian_langs = ('hi', 'ta', 'te', 'ml', 'kn', 'bn', 'mr', 'pa')
+
+    def tv_discover(gte, lte, **extra):
+        params = {
+            'first_air_date.gte': gte,
+            'first_air_date.lte': lte,
+            'sort_by': extra.pop('sort_by', 'popularity.desc'),
+            'include_adult': 'false',
+            'page': extra.pop('page', 1),
+            'language': 'en-US',
+        }
+        params.update(extra)
+        return ('/discover/tv', params)
+
+    calls = (
+        [tv_discover(week_gte, week_lte, watch_region='IN', sort_by='popularity.desc', page=1)]
+        + [tv_discover(week_gte, week_lte, watch_region='IN', sort_by='popularity.desc', page=2)]
+        + [
+            tv_discover(week_gte, week_lte, with_original_language=lang, watch_region='IN', sort_by='popularity.desc')
+            for lang in indian_langs
+        ]
+        + [('/tv/on_the_air', {'language': 'en-US', 'page': 1})]
+        + [('/tv/airing_today', {'language': 'en-US', 'page': 1})]
+        + [('/trending/tv/week', {'language': 'en-US'})]
+        + [
+            tv_discover(recent_gte, week_lte, with_original_language=lang, watch_region='IN', sort_by='popularity.desc')
+            for lang in indian_langs[:4]
+        ]
+    )
+
+    def cards_from(payloads, take=24):
+        out = []
+        seen = set()
+        for payload in payloads:
+            for item in (payload or {}).get('results') or []:
+                tmdb_id = item.get('id')
+                if not tmdb_id or str(tmdb_id) in seen:
+                    continue
+                backdrop = item.get('backdrop_path')
+                poster = item.get('poster_path')
+                if not backdrop and not poster:
+                    continue
+                first_air = _parse_release_date(item.get('first_air_date'))
+                lang = (item.get('original_language') or '').lower()
+                seen.add(str(tmdb_id))
+                out.append({
+                    'id': str(tmdb_id),
+                    'title': item.get('name') or item.get('original_name') or 'Untitled',
+                    'poster': tmdb_poster_url(poster),
+                    'image': tmdb_poster_url(backdrop, size='w1280') if backdrop else tmdb_poster_url(poster),
+                    'vote_average': item.get('vote_average') or 0,
+                    'release_label': _format_schedule_date(first_air),
+                    'origin': 'India' if lang in indian_langs else 'World',
+                })
+                if len(out) >= take:
+                    return out
+        return out
+
+    payloads = tmdb_get_many(calls)
+    raw = cards_from(payloads, take=limit * 2)
+    india = [c for c in raw if c['origin'] == 'India']
+    world = [c for c in raw if c['origin'] == 'World']
+
+    series = []
+    seen = set()
+    for pool in (india, world):
+        for card in pool:
+            if card['id'] in seen:
+                continue
+            seen.add(card['id'])
+            series.append(card)
+            if len(series) >= limit:
+                break
+        if len(series) >= limit:
+            break
+
+    if not series:
+        if cached and cached.get('data'):
+            return cached['data'][:limit]
+        return []
+
+    fetch_weekly_trending_series._cache = {
+        'at': now,
+        'as_of': today,
+        'data': series,
+    }
+    return series[:limit]
+
+
+def get_popular_series(limit=12):
+    """Series ranked by community episode ratings."""
+    popular_data = db.session.query(
+        EpisodeRating.series_tmdb_id,
+        func.count(EpisodeRating.id).label('rating_count'),
+        func.count(func.distinct(EpisodeRating.user_id)).label('reviewer_count'),
+        func.avg(EpisodeRating.rating).label('avg_rating'),
+    ).group_by(
+        EpisodeRating.series_tmdb_id,
+    ).order_by(
+        func.count(func.distinct(EpisodeRating.user_id)).desc(),
+        func.count(EpisodeRating.id).desc(),
+    ).limit(limit).all()
+
+    series = []
+    for tmdb_id, rating_count, reviewer_count, avg_rating in popular_data:
+        show = fetch_tv_by_id(tmdb_id)
+        series.append({
+            'title': show['Title'] if show else f'Series {tmdb_id}',
+            'tmdb_id': str(tmdb_id),
+            'poster_url': show['Poster'] if show else None,
+            'avg_rating': round(avg_rating or 0, 1),
+            'rating_count': rating_count,
+            'reviewer_count': reviewer_count,
+        })
+    return series
+
+
 def fetch_cinema_discussion_posts(limit=3, lookback_days=7):
     """Pick recent community review posts as discussion starters."""
     cutoff = datetime.utcnow() - timedelta(days=lookback_days)
@@ -1773,8 +2783,105 @@ def home():
 
 @app.route('/community')
 def community():
-    """Send members to the live lounge (Discord: text + voice/video, 100+ seats)."""
-    return redirect(COMMUNITY_INVITE_URL)
+    feed_filter = request.args.get('filter', 'for-you').strip().lower()
+    valid_filters = {'for-you', 'following', 'trending', 'reviews', 'my-posts', 'saved'}
+    if feed_filter not in valid_filters:
+        feed_filter = 'for-you'
+
+    viewer_id = current_user.id if current_user.is_authenticated else None
+    feed = build_community_feed(viewer_id=viewer_id, feed_filter=feed_filter, limit=50)
+    following_ids = set()
+    if current_user.is_authenticated:
+        following_ids = {user.id for user in current_user.followed.all()}
+    return render_view(
+        'community',
+        feed=feed,
+        following_ids=following_ids,
+        feed_filter=feed_filter,
+    )
+
+
+@app.route('/community/post', methods=['POST'])
+@login_required
+def community_post():
+    content = (request.form.get('content') or '').strip()
+    file = request.files.get('media')
+
+    media_url = None
+    media_type = None
+    if file and file.filename:
+        if not allowed_community_media(file.filename):
+            flash('Use JPG, PNG, GIF, WebP, MP4, WebM, or MOV.', 'danger')
+            return redirect(url_for('community'))
+        media_type = community_media_type(file.filename)
+        os.makedirs(app.config['COMMUNITY_MEDIA_FOLDER'], exist_ok=True)
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        filename = secure_filename(f"post_{current_user.id}_{int(datetime.utcnow().timestamp())}.{ext}")
+        filepath = os.path.join(app.config['COMMUNITY_MEDIA_FOLDER'], filename)
+        file.save(filepath)
+        media_url = url_for('static', filename=f'community_media/{filename}')
+
+    if not content and not media_url:
+        flash('Add text, an image, or a video before posting.', 'warning')
+        return redirect(url_for('community', filter=request.form.get('filter') or 'for-you'))
+    if len(content) > 500:
+        flash('Posts are limited to 500 characters.', 'warning')
+        return redirect(url_for('community', filter=request.form.get('filter') or 'for-you'))
+
+    db.session.add(CommunityPost(
+        content=content,
+        media_url=media_url,
+        media_type=media_type,
+        is_seed=False,
+        user_id=current_user.id,
+    ))
+    db.session.commit()
+    flash('Posted to the community.', 'success')
+    return redirect(url_for('community', filter=request.form.get('filter') or 'for-you'))
+
+
+@app.route('/community/thought/<int:post_id>/like', methods=['POST'])
+@login_required
+def community_like_thought(post_id):
+    post = CommunityPost.query.get_or_404(post_id)
+    existing = CommunityPostLike.query.filter_by(user_id=current_user.id, post_id=post.id).first()
+    if existing:
+        db.session.delete(existing)
+    else:
+        db.session.add(CommunityPostLike(user_id=current_user.id, post_id=post.id))
+    db.session.commit()
+    return redirect(request.referrer or url_for('community'))
+
+
+@app.route('/community/thought/<int:post_id>/save', methods=['POST'])
+@login_required
+def community_save_thought(post_id):
+    post = CommunityPost.query.get_or_404(post_id)
+    existing = CommunitySavedPost.query.filter_by(user_id=current_user.id, post_id=post.id).first()
+    if existing:
+        db.session.delete(existing)
+        flash('Removed from saved posts.', 'info')
+    else:
+        db.session.add(CommunitySavedPost(user_id=current_user.id, post_id=post.id))
+        flash('Post saved.', 'success')
+    db.session.commit()
+    return redirect(request.referrer or url_for('community'))
+
+
+@app.route('/community/thought/<int:post_id>/delete', methods=['POST'])
+@login_required
+def community_delete_thought(post_id):
+    post = CommunityPost.query.get_or_404(post_id)
+    if post.user_id != current_user.id:
+        flash('You can only delete your own posts.', 'danger')
+        return redirect(url_for('community'))
+    delete_community_media_file(post.media_url)
+    CommunityPostLike.query.filter_by(post_id=post.id).delete()
+    CommunitySavedPost.query.filter_by(post_id=post.id).delete()
+    db.session.delete(post)
+    db.session.commit()
+    flash('Post removed.', 'info')
+    return redirect(url_for('community'))
 
 
 @app.route('/newsletter', methods=['POST'])
@@ -1824,7 +2931,7 @@ def signup():
             return redirect(url_for('signup'))
 
         login_user(user)
-        flash('Welcome to Filmboxed!', 'success')
+        flash('Welcome to 4 Movies!', 'success')
         return redirect(url_for('home'))
 
     return render_view('signup')
@@ -1902,6 +3009,10 @@ def film_page(imdb_id):
         watched = WatchedFilm.query.filter_by(user_id=current_user.id, tmdb_id=str(tmdb_id)).first() is not None
         user_lists = MovieList.query.filter_by(user_id=current_user.id).order_by(MovieList.name).all()
 
+    upcoming = resolve_upcoming_movie(movie, tmdb_id)
+    cant_miss = build_cant_miss_context('movie', tmdb_id, viewer_id=current_user.id if current_user.is_authenticated else None) if upcoming else None
+    watch_online = build_watch_online_cards(watch_providers) if not upcoming else []
+
     return render_view(
         'film',
         movie=movie,
@@ -1915,7 +3026,136 @@ def film_page(imdb_id):
         watched=watched,
         user_lists=user_lists,
         watch_providers=watch_providers,
+        watch_online=watch_online,
+        is_upcoming=upcoming,
+        cant_miss=cant_miss,
     )
+
+
+@app.route('/series')
+def series_index():
+    if not TMDB_API_KEY:
+        flash('Set TMDB_API_KEY to load series from TMDB.', 'warning')
+        return redirect(url_for('home'))
+
+    query = request.args.get('query', '').strip()
+    weekly_trending_series = []
+    popular_series = []
+    if query:
+        series_list = search_tmdb_series(query, limit=24)
+    else:
+        weekly_trending_series = fetch_weekly_trending_series(limit=18)
+        popular_series = get_popular_series(limit=10)
+        series_list = fetch_series_catalog(limit=30)
+    return render_view(
+        'series',
+        series_list=series_list,
+        query=query,
+        weekly_trending_series=weekly_trending_series,
+        popular_series=popular_series,
+        tmdb_configured=bool(TMDB_API_KEY),
+    )
+
+
+@app.route('/series/<tmdb_id>')
+def series_page(tmdb_id):
+    if not TMDB_API_KEY:
+        flash('Set TMDB_API_KEY to load series pages from TMDB.', 'warning')
+        return redirect(url_for('home'))
+
+    show = fetch_tv_by_id(tmdb_id)
+    if not show:
+        flash('Series not found.', 'danger')
+        return redirect(url_for('series_index'))
+
+    seasons = show.get('seasons') or []
+    if not seasons:
+        flash('No seasons available for this series yet.', 'warning')
+        return redirect(url_for('series_index'))
+
+    try:
+        selected_season = int(request.args.get('season') or seasons[0]['number'])
+    except (TypeError, ValueError):
+        selected_season = seasons[0]['number']
+
+    valid_numbers = {s['number'] for s in seasons}
+    if selected_season not in valid_numbers:
+        selected_season = seasons[0]['number']
+
+    season_data = fetch_tv_season(tmdb_id, selected_season)
+    if not season_data:
+        flash('Could not load episodes for this season.', 'warning')
+        return redirect(url_for('series_index'))
+
+    episode_ratings = {}
+    overall_rating = None
+    rated_count = 0
+    if current_user.is_authenticated:
+        episode_ratings = user_episode_ratings(current_user.id, tmdb_id)
+        overall_rating, rated_count = user_series_overall_rating(current_user.id, tmdb_id)
+
+    for episode in season_data.get('episodes') or []:
+        episode['user_rating'] = episode_ratings.get((selected_season, episode['number']))
+
+    upcoming = resolve_upcoming_series(show, tmdb_id)
+    cant_miss = build_cant_miss_context('tv', tmdb_id, viewer_id=current_user.id if current_user.is_authenticated else None) if upcoming else None
+    watch_providers = fetch_watch_providers(tmdb_id, media_type='tv')
+    watch_online = build_watch_online_cards(watch_providers) if not upcoming else []
+
+    return render_view(
+        'series_detail',
+        show=show,
+        seasons=seasons,
+        season=season_data,
+        selected_season=selected_season,
+        overall_rating=overall_rating,
+        rated_count=rated_count,
+        episode_ratings=episode_ratings,
+        is_upcoming=upcoming,
+        cant_miss=cant_miss,
+        watch_online=watch_online,
+    )
+
+
+@app.route('/series/<tmdb_id>/rate/<int:season>/<int:episode>', methods=['POST'])
+@login_required
+def rate_episode(tmdb_id, season, episode):
+    show = fetch_tv_by_id(tmdb_id)
+    if not show:
+        flash('Series not found.', 'danger')
+        return redirect(url_for('series_index'))
+
+    rating = parse_rating(request.form.get('rating'))
+    if not rating:
+        flash('Pick a rating between 1 and 10 stars (half steps).', 'warning')
+        return redirect(url_for('series_page', tmdb_id=tmdb_id, season=season))
+
+    row = EpisodeRating.query.filter_by(
+        user_id=current_user.id,
+        series_tmdb_id=str(tmdb_id),
+        season_number=season,
+        episode_number=episode,
+    ).first()
+    if row:
+        row.rating = rating
+        row.updated_at = datetime.utcnow()
+    else:
+        db.session.add(EpisodeRating(
+            user_id=current_user.id,
+            series_tmdb_id=str(tmdb_id),
+            season_number=season,
+            episode_number=episode,
+            rating=rating,
+        ))
+    db.session.commit()
+
+    overall, count = user_series_overall_rating(current_user.id, tmdb_id)
+    stars = overall / 2 if overall else 0
+    flash(
+        f'Episode saved. Your series score is {overall:.1f}/10 ({stars:.1f}/5) from {count} rated episode{"s" if count != 1 else ""}.',
+        'success',
+    )
+    return redirect(url_for('series_page', tmdb_id=tmdb_id, season=season))
 
 
 @app.route('/person/<person_id>')
@@ -1930,6 +3170,38 @@ def person_page(person_id):
         return redirect(url_for('home'))
 
     return render_view('person', person=person)
+
+
+@app.route('/cant-miss/toggle', methods=['POST'])
+@login_required
+def cant_miss_toggle():
+    media_type = (request.form.get('media_type') or '').strip().lower()
+    tmdb_id = (request.form.get('tmdb_id') or '').strip()
+    next_url = request.form.get('next') or request.referrer or url_for('home')
+
+    if media_type not in ('movie', 'tv') or not tmdb_id:
+        flash('Could not update your fan mark.', 'warning')
+        return redirect(next_url)
+
+    existing = CantMissFan.query.filter_by(
+        user_id=current_user.id,
+        media_type=media_type,
+        tmdb_id=tmdb_id,
+    ).first()
+
+    if existing:
+        db.session.delete(existing)
+        flash("Removed from Can't Miss This.", 'info')
+    else:
+        db.session.add(CantMissFan(
+            user_id=current_user.id,
+            media_type=media_type,
+            tmdb_id=tmdb_id,
+        ))
+        flash("Marked as Can't Miss This!", 'success')
+
+    db.session.commit()
+    return redirect(next_url)
 
 
 @app.route('/film/<imdb_id>/like', methods=['POST'])
@@ -2213,17 +3485,23 @@ def add_diary():
         is_rewatch = bool(request.form.get('is_rewatch'))
         watched_date = datetime.strptime(request.form['watched_date'], '%Y-%m-%d').date()
 
-        entry = DiaryEntry(
-            title=title,
-            rating=rating,
-            review=review,
-            watched_date=watched_date,
-            poster_url=poster_url,
+        upsert_diary_for_rating(
             user_id=current_user.id,
+            title=title,
+            poster=poster_or_placeholder(poster_url),
             imdb_id=imdb_id,
-            is_rewatch=is_rewatch
+            rating=rating,
+            review=review or None,
+            watched_date=watched_date,
         )
-        db.session.add(entry)
+        if is_rewatch:
+            entry = DiaryEntry.query.filter_by(
+                user_id=current_user.id,
+                title=title,
+                watched_date=watched_date,
+            ).first()
+            if entry:
+                entry.is_rewatch = True
         db.session.commit()
         flash("Diary entry added!", "success")
         return redirect(url_for('diary'))
@@ -2232,9 +3510,16 @@ def add_diary():
 
 
 @app.route('/like/<int:post_id>', methods=['POST'])
+@login_required
 def like_post(post_id):
     post = Post.query.get_or_404(post_id)
-    post.likes += 1
+    existing = PostLike.query.filter_by(user_id=current_user.id, post_id=post.id).first()
+    if existing:
+        db.session.delete(existing)
+        post.likes = max(0, (post.likes or 0) - 1)
+    else:
+        db.session.add(PostLike(user_id=current_user.id, post_id=post.id))
+        post.likes = (post.likes or 0) + 1
     db.session.commit()
     return redirect(request.referrer or url_for('home'))
 
@@ -2406,12 +3691,14 @@ def schedule():
 @app.route('/profile/<username>')
 def user_profile(username):
     user = User.query.filter_by(username=username).first_or_404()
+    sync_user_film_logs(user.id)
     tab = request.args.get('tab', 'reviews')
     posts = Post.query.filter_by(user_id=user.id).order_by(Post.created_at.desc()).all()
     favorites = FavoriteFilm.query.filter_by(user_id=user.id).order_by(FavoriteFilm.position).all()
     diary_entries = DiaryEntry.query.filter_by(user_id=user.id).order_by(DiaryEntry.watched_date.desc()).limit(24).all()
     watched_films = WatchedFilm.query.filter_by(user_id=user.id).order_by(WatchedFilm.watched_at.desc()).limit(48).all()
     liked_films = FilmLike.query.filter_by(user_id=user.id).order_by(FilmLike.created_at.desc()).limit(48).all()
+    stats = user_profile_stats(user.id)
     is_following = current_user.is_authenticated and current_user.is_following(user) and current_user != user
     return render_view(
         'profile',
@@ -2422,6 +3709,7 @@ def user_profile(username):
         diary_months=group_diary_by_month(diary_entries),
         watched_films=watched_films,
         liked_films=liked_films,
+        stats=stats,
         tab=tab,
         is_following=is_following
     )
@@ -2435,7 +3723,7 @@ def follow_user(username):
         current_user.follow(target_user)
         db.session.commit()
         flash(f"You are now following {username}!", "success")
-    return redirect(url_for('user_profile', username=username))
+    return redirect(request.referrer or url_for('user_profile', username=username))
 
 
 @app.route('/unfollow/<username>', methods=['POST'])
@@ -2446,7 +3734,7 @@ def unfollow_user(username):
         current_user.unfollow(target_user)
         db.session.commit()
         flash(f"You unfollowed {username}.", "info")
-    return redirect(url_for('user_profile', username=username))
+    return redirect(request.referrer or url_for('user_profile', username=username))
 
 
 @app.route('/edit/<int:post_id>', methods=['GET', 'POST'])
@@ -2463,6 +3751,18 @@ def edit_post(post_id):
         post.rating = parse_rating(request.form.get('rating'), post.rating)
         post.poster_url = request.form.get('poster_url', '').strip()
         post.imdb_id = request.form.get('imdb_id', '').strip() or post.imdb_id
+        review_text = post.content or ''
+        if review_text.startswith('Rated '):
+            review_text = ''
+        upsert_diary_for_rating(
+            user_id=current_user.id,
+            title=post.movie,
+            poster=poster_or_placeholder(post.poster_url),
+            imdb_id=post.imdb_id,
+            rating=post.rating,
+            review=review_text or None,
+            watched_date=post.created_at.date() if post.created_at else date.today(),
+        )
         db.session.commit()
         flash('Review updated.', 'success')
         return redirect(url_for('user_profile', username=current_user.username))
@@ -2495,8 +3795,23 @@ def dashboard():
 @app.route('/diary')
 @login_required
 def diary():
-    entries = DiaryEntry.query.filter_by(user_id=current_user.id).order_by(DiaryEntry.watched_date.desc()).all()
-    return render_view('diary', entries=entries, diary_months=group_diary_by_month(entries))
+    diary_type = request.args.get('type', 'film').strip().lower()
+    if diary_type not in {'film', 'series'}:
+        diary_type = 'film'
+
+    if diary_type == 'series':
+        entries = user_series_diary_entries(current_user.id)
+    else:
+        entries = DiaryEntry.query.filter_by(user_id=current_user.id).order_by(
+            DiaryEntry.watched_date.desc()
+        ).all()
+
+    return render_view(
+        'diary',
+        entries=entries,
+        diary_months=group_diary_by_month(entries),
+        diary_type=diary_type,
+    )
 
 
 @app.route('/delete_diary/<int:entry_id>', methods=['POST'])
@@ -2964,7 +4279,7 @@ def add_movie_to_list(list_id):
 
     if added:
         touch_stack(movie_list)
-        db.session.commit()
+    db.session.commit()
 
     if wants_json:
         return jsonify({'ok': True, 'added': added, 'skipped': skipped})
@@ -3033,6 +4348,11 @@ def reorder_list_movies(list_id):
 @app.route('/popular')
 def popular():
     return render_view('popular', movies=get_popular_movies(limit=24))
+
+
+@app.route('/series/popular')
+def popular_series_page():
+    return render_view('popular_series', series=get_popular_series(limit=24))
 
 
 @app.route('/add_to_watchlist', methods=['POST'])

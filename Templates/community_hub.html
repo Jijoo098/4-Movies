@@ -1,0 +1,204 @@
+<div class="community-hub">
+  <div class="community-hub__mobile-bar">
+    <button type="button" class="community-hub__drawer-btn" data-drawer="left" aria-label="Open community menu">Menu</button>
+  </div>
+
+  <div class="community-layout community-layout--feed">
+    <aside class="community-sidebar community-sidebar--left" id="communitySidebarLeft">
+      <div class="community-sidebar__intro">
+        <h2>Community</h2>
+        <p>Connect. Share. Discuss. Be part of the story.</p>
+      </div>
+
+      <nav class="community-nav" aria-label="Community sections">
+        {% set nav_items = [
+          ('for-you', 'For You', 'home'),
+          ('following', 'Following', 'people'),
+          ('trending', 'Trending', 'trending'),
+          ('my-posts', 'My Posts', 'edit'),
+          ('saved', 'Saved Posts', 'bookmark'),
+        ] %}
+        {% for key, label, icon in nav_items %}
+        <a
+          class="community-nav__link{% if feed_filter == key %} is-active{% endif %}"
+          href="{{ url_for('community', filter=key) }}"
+        >
+          <span class="community-nav__icon" aria-hidden="true">
+            {% if icon == 'home' %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg>
+            {% elif icon == 'people' %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="9" cy="8" r="2.5"/><circle cx="16.5" cy="9" r="2"/><path d="M4.5 18c.6-2.2 2.4-3.5 4.5-3.5s3.9 1.3 4.5 3.5"/><path d="M14.5 18c.4-1.5 1.6-2.5 3-2.5 1 0 1.9.4 2.5 1.2"/></svg>
+            {% elif icon == 'trending' %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 18V6"/><path d="M4 18h16"/><path d="M8 14l3-4 3 2 5-7"/></svg>
+            {% elif icon == 'edit' %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 15.5 15 9.5l1.5 1.5-6 6H9z"/><path d="M13.5 8 15 6.5"/></svg>
+            {% elif icon == 'bookmark' %}
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 4h10v16l-5-3.5L7 20z"/></svg>
+            {% endif %}
+          </span>
+          <span class="community-nav__label">{{ label }}</span>
+        </a>
+        {% endfor %}
+      </nav>
+
+      {% if current_user.is_authenticated %}
+      <button type="button" class="community-nav__create" data-scroll-composer>+ Create Post</button>
+      {% else %}
+      <a href="{{ url_for('login', next=url_for('community')) }}" class="community-nav__create">+ Create Post</a>
+      {% endif %}
+    </aside>
+
+    <main class="community-main">
+      <header class="community-main__head">
+        <div>
+          <h1>
+            {% if feed_filter == 'saved' %}Saved Posts
+            {% elif feed_filter == 'my-posts' %}My Posts
+            {% elif feed_filter == 'following' %}Following
+            {% elif feed_filter == 'trending' %}Trending
+            {% else %}For You{% endif %}
+          </h1>
+          <p class="community-main__sub">Share photos, videos, and thoughts with the lobby.</p>
+        </div>
+      </header>
+
+      {% if current_user.is_authenticated %}
+      <section class="community-compose community-compose--full" id="communityComposer">
+        <form method="POST" action="{{ url_for('community_post') }}" enctype="multipart/form-data" class="community-compose__form" id="communityComposeForm">
+          <input type="hidden" name="filter" value="{{ feed_filter }}">
+
+          <div class="community-compose__top">
+            <div class="community-compose__avatar" aria-hidden="true">
+              {% if current_user.profile_pic %}
+              <img src="{{ url_for('static', filename='profile_pics/' ~ current_user.profile_pic) }}" alt="">
+              {% else %}
+              <span>{{ current_user.username[:1]|upper }}</span>
+              {% endif %}
+            </div>
+            <textarea
+              name="content"
+              class="community-compose__input"
+              rows="2"
+              maxlength="500"
+              placeholder="Share your thoughts about films, series or anything..."
+            ></textarea>
+          </div>
+
+          <div class="community-compose__preview" id="communityMediaPreview" hidden></div>
+
+          <div class="community-compose__toolbar">
+            <div class="community-compose__tools" role="group" aria-label="Post attachments">
+              <button type="button" class="community-compose__tool" data-compose-tool="media">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10.5" r="1.5"/><path d="m21 17-5.2-5.2a1.5 1.5 0 0 0-2.1 0L8 17"/></svg>
+                <span>Photo/Video</span>
+              </button>
+            </div>
+            <button type="submit" class="community-compose__submit">Post</button>
+          </div>
+
+          <input
+            type="file"
+            id="communityMedia"
+            name="media"
+            class="community-compose__file"
+            accept="image/jpeg,image/png,image/webp,video/mp4,video/webm,video/quicktime"
+          >
+        </form>
+      </section>
+      {% else %}
+      <div class="community-guest-cta">
+        <p>Sign in to post, save, and subscribe to members.</p>
+        <a href="{{ url_for('login', next=url_for('community')) }}" class="btn btn-primary btn-sm">Sign in</a>
+      </div>
+      {% endif %}
+
+      <div class="community-feed">
+        {% for item in feed %}
+        <article class="community-card" id="post-{{ item.id }}">
+          <div class="community-card__avatar">{{ item.user.username[:1]|upper }}</div>
+          <div class="community-card__body">
+            <div class="community-card__head">
+              <div class="community-card__who">
+                <a class="community-card__name" href="{{ url_for('user_profile', username=item.user.username) }}">{{ item.user.username }}</a>
+                <span class="community-card__time">{{ item.time_label }}</span>
+              </div>
+              {% if current_user.is_authenticated and item.user.id != current_user.id %}
+                {% if item.user.id in following_ids %}
+                <form method="POST" action="{{ url_for('unfollow_user', username=item.user.username) }}">
+                  <button type="submit" class="community-subscribe is-following">Subscribed</button>
+                </form>
+                {% else %}
+                <form method="POST" action="{{ url_for('follow_user', username=item.user.username) }}">
+                  <button type="submit" class="community-subscribe">Subscribe</button>
+                </form>
+                {% endif %}
+              {% endif %}
+            </div>
+
+            {% if item.content %}
+            <p class="community-card__text">{{ item.content }}</p>
+            {% endif %}
+
+            {% if item.media_url %}
+            <div class="community-card__media">
+              {% if item.media_type == 'video' %}
+              <video controls playsinline preload="metadata" src="{{ item.media_url }}"></video>
+              {% else %}
+              <img src="{{ item.media_url }}" alt="Post media by {{ item.user.username }}" loading="lazy">
+              {% endif %}
+            </div>
+            {% endif %}
+
+            <div class="community-card__actions">
+              {% if current_user.is_authenticated %}
+              <form method="POST" action="{{ url_for('community_like_thought', post_id=item.id) }}">
+                <button type="submit" class="community-action{% if item.liked_by_me %} is-active{% endif %}">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M7 11v10H4.5A1.5 1.5 0 0 1 3 19.5V12a1 1 0 0 1 1-1h3z"/><path d="M7 11l3.2-6.4a2 2 0 0 1 3.6.8V11h6.8A1.6 1.6 0 0 1 22 12.6l-1.4 7A1.6 1.6 0 0 1 19 21H7"/></svg>
+                  <span>{{ item.likes }}</span>
+                </button>
+              </form>
+              <form method="POST" action="{{ url_for('community_save_thought', post_id=item.id) }}">
+                <button type="submit" class="community-action{% if item.saved_by_me %} is-active{% endif %}" aria-label="{{ 'Unsave post' if item.saved_by_me else 'Save post' }}">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+                  <span>Save</span>
+                </button>
+              </form>
+              {% else %}
+              <span class="community-action">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M7 11v10H4.5A1.5 1.5 0 0 1 3 19.5V12a1 1 0 0 1 1-1h3z"/><path d="M7 11l3.2-6.4a2 2 0 0 1 3.6.8V11h6.8A1.6 1.6 0 0 1 22 12.6l-1.4 7A1.6 1.6 0 0 1 19 21H7"/></svg>
+                <span>{{ item.likes }}</span>
+              </span>
+              {% endif %}
+
+              <button type="button" class="community-action community-share" data-share-url="{{ request.url_root.rstrip('/') }}{{ url_for('community') }}#post-{{ item.id }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
+                <span>Share</span>
+              </button>
+
+              {% if current_user.is_authenticated and item.user.id == current_user.id %}
+              <form method="POST" action="{{ url_for('community_delete_thought', post_id=item.id) }}" onsubmit="return confirm('Delete this post?');">
+                <button type="submit" class="community-action community-action--danger">Delete</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+        </article>
+        {% else %}
+        <div class="community-empty">
+          {% if feed_filter == 'saved' %}
+          <h3>No saved posts</h3><p>Posts you save will appear here.</p>
+          {% elif feed_filter == 'my-posts' %}
+          <h3>No posts yet</h3><p>Your community posts will show up here.</p>
+          {% elif feed_filter == 'following' %}
+          <h3>Nothing from people you follow</h3><p>Subscribe to members to fill this feed.</p>
+          {% elif feed_filter == 'trending' %}
+          <h3>No trending posts yet</h3><p>Like posts to help them trend.</p>
+          {% else %}
+          <h3>No posts yet</h3><p>Be the first to share something with the community.</p>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </main>
+  </div>
+</div>

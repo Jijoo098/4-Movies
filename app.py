@@ -4,15 +4,25 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
+import random
+import re
+import socket
+import struct
 import threading
+import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPSConnection
+from urllib3.connectionpool import HTTPSConnectionPool
+from urllib3.poolmanager import PoolManager
 import click
 import json
 from flask.cli import with_appcontext
 from werkzeug.utils import secure_filename
 import os
 from flask_login import LoginManager, login_user, logout_user, login_required, current_user, UserMixin
-from sqlalchemy import func, text
+from sqlalchemy import and_, func, or_, text
+from sqlalchemy.exc import IntegrityError
 from urllib.parse import quote_plus
 
 # ------------------ Configuration ------------------ #
@@ -44,7 +54,7 @@ COMMUNITY_INVITE_URL = os.environ.get(
 ).strip()
 
 app = Flask(__name__)
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///filmboxed.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///filmboxed.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.secret_key = 'your_secret_key'
 app.config['UPLOAD_FOLDER'] = 'static/profile_pics'
@@ -61,8 +71,119 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
+# Jio's resolver answers api.themoviedb.org with an address whose TLS handshake
+# never completes. Ask 1.1.1.1 / 8.8.8.8 for the real address, then connect to
+# that IP while keeping the hostname for certificate checks.
+_PUBLIC_DNS_SERVERS = ('1.1.1.1', '8.8.8.8')
+_PUBLIC_DNS_CACHE = {}
+_PUBLIC_DNS_LOCK = threading.Lock()
+_PUBLIC_DNS_TTL = 1800
+
+
+def _dns_query_a(server, host):
+    tid = random.randint(0, 65535)
+    header = struct.pack('>HHHHHH', tid, 0x0100, 1, 0, 0, 0)
+    qname = b''.join(
+        bytes([len(label)]) + label.encode('ascii')
+        for label in host.rstrip('.').split('.')
+    ) + b'\x00'
+    packet = header + qname + struct.pack('>HH', 1, 1)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(1.2)
+    try:
+        sock.sendto(packet, (server, 53))
+        data, _ = sock.recvfrom(512)
+    finally:
+        sock.close()
+    if len(data) < 12 or struct.unpack('>H', data[:2])[0] != tid:
+        return None
+    answer_count = struct.unpack('>H', data[6:8])[0]
+    index = 12
+    while index < len(data) and data[index] != 0:
+        index += data[index] + 1
+    index += 5
+    for _ in range(answer_count):
+        if index >= len(data):
+            break
+        if data[index] & 0xC0 == 0xC0:
+            index += 2
+        else:
+            while index < len(data) and data[index] != 0:
+                index += data[index] + 1
+            index += 1
+        if index + 10 > len(data):
+            break
+        rtype, _rclass, _ttl, rdlen = struct.unpack('>HHIH', data[index:index + 10])
+        index += 10
+        rdata = data[index:index + rdlen]
+        index += rdlen
+        if rtype == 1 and len(rdata) == 4:
+            return socket.inet_ntoa(rdata)
+    return None
+
+
+def _resolve_public_ipv4(host):
+    host = (host or '').rstrip('.')
+    if not host:
+        return None
+    now = time.monotonic()
+    with _PUBLIC_DNS_LOCK:
+        cached = _PUBLIC_DNS_CACHE.get(host)
+        if cached and cached[1] > now:
+            return cached[0]
+    for server in _PUBLIC_DNS_SERVERS:
+        try:
+            ip = _dns_query_a(server, host)
+        except OSError:
+            ip = None
+        if ip:
+            with _PUBLIC_DNS_LOCK:
+                _PUBLIC_DNS_CACHE[host] = (ip, now + _PUBLIC_DNS_TTL)
+            return ip
+    # Lookup failed: keep using the last known address rather than stalling.
+    if cached:
+        with _PUBLIC_DNS_LOCK:
+            _PUBLIC_DNS_CACHE[host] = (cached[0], now + 60)
+        return cached[0]
+    return None
+
+
+class _PublicDNSHTTPSConnection(HTTPSConnection):
+    def _new_conn(self):
+        ip = _resolve_public_ipv4(self._dns_host)
+        if not ip:
+            return super()._new_conn()
+        saved = self._dns_host
+        self._dns_host = ip
+        try:
+            return super()._new_conn()
+        finally:
+            self._dns_host = saved
+
+
+class _PublicDNSHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = _PublicDNSHTTPSConnection
+
+
+class _PublicDNSAdapter(HTTPAdapter):
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        self._pool_connections = connections
+        self._pool_maxsize = maxsize
+        self._pool_block = block
+        manager = PoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            **pool_kwargs,
+        )
+        manager.pool_classes_by_scheme = dict(manager.pool_classes_by_scheme)
+        manager.pool_classes_by_scheme['https'] = _PublicDNSHTTPSConnectionPool
+        self.poolmanager = manager
+
+
 # Reuse TLS connections; run independent TMDB calls in parallel.
 _TMDB_SESSION = requests.Session()
+_TMDB_SESSION.mount('https://', _PublicDNSAdapter())
 _TMDB_CACHE = {}
 _TMDB_CACHE_LOCK = threading.Lock()
 _TMDB_CACHE_TTL = 1800  # 30 min for list/discover
@@ -168,36 +289,90 @@ def tmdb_get(path, ttl=None, **params):
         )
     key = _tmdb_cache_key(path, params)
     now = datetime.utcnow()
+    stale = None
     with _TMDB_CACHE_LOCK:
         hit = _TMDB_CACHE.get(key)
-        if hit and (now - hit['at']).total_seconds() < hit['ttl']:
-            return hit['data']
+        if hit and hit['data'] is not None:
+            age = (now - hit['at']).total_seconds()
+            if age < hit['ttl']:
+                return hit['data']
+            stale = hit['data']
+        elif hit and (now - hit['at']).total_seconds() < hit['ttl']:
+            return None  # recent failure: don't hammer TMDB
 
+    # Stale-while-revalidate: answer instantly from the old copy and
+    # refresh it in the background so visitors never wait on TMDB.
+    if stale is not None:
+        _tmdb_refresh_async(key, path, params, ttl)
+        return stale
+
+    data = _tmdb_fetch(path, params)
+    _tmdb_store(key, data, ttl)
+    return data
+
+
+_TMDB_REFRESHING = set()
+
+
+def _tmdb_fetch(path, params):
     query = dict(params)
     query['api_key'] = TMDB_API_KEY
-    data = None
     for attempt in range(2):
         try:
-            response = _TMDB_SESSION.get(f"{TMDB_BASE}{path}", params=query, timeout=8)
+            # (connect, read) - fail fast instead of hanging for 8s+ on a bad connection.
+            response = _TMDB_SESSION.get(f"{TMDB_BASE}{path}", params=query, timeout=(3.5, 6))
             if response.status_code == 200:
-                data = response.json()
-                break
+                return response.json()
             if response.status_code == 429:
+                time.sleep(0.3)
                 continue
             if response.status_code in (500, 502, 503, 504) and attempt == 0:
                 continue
-            break
-        except requests.RequestException:
+            return None
+        except (requests.RequestException, ValueError):
             if attempt == 0:
                 continue
-            break
+            return None
+    return None
 
-    store_ttl = ttl if data is not None else 45
+
+def _tmdb_store(key, data, ttl):
     with _TMDB_CACHE_LOCK:
-        if len(_TMDB_CACHE) > 800:
-            _TMDB_CACHE.clear()
-        _TMDB_CACHE[key] = {'at': datetime.utcnow(), 'ttl': store_ttl, 'data': data}
-    return data
+        if data is None:
+            old = _TMDB_CACHE.get(key)
+            if old and old['data'] is not None:
+                # Keep serving the last good copy; retry again shortly.
+                old['at'] = datetime.utcnow() - timedelta(seconds=max(old['ttl'] - 30, 0))
+                return
+        if len(_TMDB_CACHE) > 1500:
+            oldest = sorted(_TMDB_CACHE.items(), key=lambda kv: kv[1]['at'])[:400]
+            for old_key, _ in oldest:
+                _TMDB_CACHE.pop(old_key, None)
+        _TMDB_CACHE[key] = {
+            'at': datetime.utcnow(),
+            'ttl': ttl if data is not None else 20,
+            'data': data,
+        }
+
+
+def _tmdb_refresh_async(key, path, params, ttl):
+    with _TMDB_CACHE_LOCK:
+        if key in _TMDB_REFRESHING:
+            return
+        _TMDB_REFRESHING.add(key)
+
+    def _job():
+        try:
+            _tmdb_store(key, _tmdb_fetch(path, params), ttl)
+        finally:
+            with _TMDB_CACHE_LOCK:
+                _TMDB_REFRESHING.discard(key)
+
+    try:
+        _JOB_POOL.submit(_job)
+    except RuntimeError:
+        with _TMDB_CACHE_LOCK:
+            _TMDB_REFRESHING.discard(key)
 
 
 def tmdb_get_many(calls):
@@ -253,7 +428,8 @@ def fetch_tmdb_videos(media_type, tmdb_id):
         return {'results': []}
     collected = []
     seen_keys = set()
-    for params in ({'language': 'en-US'}, {}):
+    all_langs = 'en,hi,ta,te,ml,kn,bn,mr,pa,gu,ur,ko,ja,zh,fr,es,de,it,pt,tr,th,ar,ru,null'
+    for params in ({'language': 'en-US'}, {'include_video_language': all_langs}, {}):
         payload = tmdb_get(f'/{media_type}/{tmdb_id}/videos', **params) or {}
         for clip in payload.get('results') or []:
             key = clip.get('key')
@@ -275,6 +451,245 @@ def resolve_trailer_url(media_type, tmdb_id, title, year, videos=None):
     return youtube_trailer_search_url(title, year)
 
 
+def person_initials(name):
+    """Two-letter initials for placeholder avatars."""
+    words = [w for w in re.split(r'[\s.\-]+', (name or '').strip()) if w]
+    if not words:
+        return '?'
+    if len(words) == 1:
+        return words[0][:2].upper()
+    return (words[0][0] + words[-1][0]).upper()
+
+
+def format_runtime_short(minutes):
+    """142 -> '2h 22m'; 45 -> '45m'; 120 -> '2h'. Empty string when unknown."""
+    try:
+        total = int(minutes)
+    except (TypeError, ValueError):
+        return ''
+    if total <= 0:
+        return ''
+    hours, mins = divmod(total, 60)
+    if hours and mins:
+        return f'{hours}h {mins}m'
+    if hours:
+        return f'{hours}h'
+    return f'{mins}m'
+
+
+def pick_certification(release_dates, regions=('IN', 'US')):
+    """Age rating (UA, A, PG-13...) from TMDB release_dates, India first."""
+    results = (release_dates or {}).get('results') or []
+    by_region = {}
+    for entry in results:
+        code = entry.get('iso_3166_1')
+        if code:
+            by_region[code] = entry.get('release_dates') or []
+    for code in list(regions) + [c for c in by_region if c not in regions]:
+        items = sorted(by_region.get(code) or [], key=lambda item: 0 if item.get('type') == 3 else 1)
+        for item in items:
+            cert = (item.get('certification') or '').strip()
+            if cert:
+                return cert
+    return ''
+
+
+def pick_title_logo(images):
+    """Best English / language-neutral title logo from TMDB images, or None."""
+    logos = [
+        logo for logo in (images or {}).get('logos') or []
+        if logo.get('file_path') and (logo.get('iso_639_1') or None) in ('en', None)
+    ]
+    if not logos:
+        return None
+    logos.sort(key=lambda logo: (
+        0 if logo.get('iso_639_1') == 'en' else 1,
+        -(logo.get('vote_average') or 0),
+        -(logo.get('width') or 0),
+    ))
+    return tmdb_poster_url(logos[0]['file_path'], size='w500')
+
+
+CREW_JOB_PRIORITY = (
+    'Director', 'Screenplay', 'Writer', 'Story', 'Novel',
+    'Director of Photography', 'Original Music Composer', 'Music',
+    'Producer', 'Executive Producer', 'Editor', 'Costume Design', 'Production Design',
+)
+
+
+def build_cast_and_crew(credits, cast_limit=16, crew_limit=12):
+    """Cast cards plus crew cards merged per person (one card, combined roles)."""
+    credits = credits or {}
+
+    def photo_for(person):
+        path = person.get('profile_path')
+        return tmdb_poster_url(path, size='w185') if path else None
+
+    cast = []
+    seen_cast = set()
+    for person in credits.get('cast') or []:
+        pid = person.get('id')
+        if not pid or pid in seen_cast:
+            continue
+        seen_cast.add(pid)
+        name = person.get('name') or 'Unknown'
+        cast.append({
+            'id': str(pid),
+            'name': name,
+            'character': person.get('character') or '',
+            'photo': photo_for(person),
+            'initials': person_initials(name),
+        })
+        if len(cast) >= cast_limit:
+            break
+
+    rank = {job: i for i, job in enumerate(CREW_JOB_PRIORITY)}
+    people = {}
+    for person in credits.get('crew') or []:
+        pid = person.get('id')
+        job = (person.get('job') or '').strip()
+        if not pid or not job:
+            continue
+        entry = people.get(pid)
+        if entry is None:
+            name = person.get('name') or 'Unknown'
+            entry = people[pid] = {
+                'id': str(pid),
+                'name': name,
+                'photo': photo_for(person),
+                'initials': person_initials(name),
+                'roles': [],
+            }
+        if not entry['photo']:
+            entry['photo'] = photo_for(person)
+        if job not in entry['roles']:
+            entry['roles'].append(job)
+
+    def entry_rank(entry):
+        ranks = [rank[r] for r in entry['roles'] if r in rank]
+        return min(ranks) if ranks else len(rank)
+
+    ordered = sorted(people.values(), key=lambda e: (entry_rank(e), e['name']))
+    preferred = [e for e in ordered if entry_rank(e) < len(rank)]
+    others = [e for e in ordered if entry_rank(e) >= len(rank)]
+    picked = preferred[:crew_limit] if len(preferred) >= 6 else (preferred + others)[:crew_limit]
+
+    crew = []
+    for entry in picked:
+        roles = sorted(entry['roles'], key=lambda r: (rank.get(r, 99), r))
+        shown = [r for r in roles if r in rank] or roles[:2]
+        crew.append({
+            'id': entry['id'],
+            'name': entry['name'],
+            'photo': entry['photo'],
+            'initials': entry['initials'],
+            'roles': shown,
+            'job': ' \u00b7 '.join(shown[:4]),
+        })
+    return cast, crew
+
+
+LANGUAGE_FALLBACK_NAMES = {
+    'en': 'English', 'hi': 'Hindi', 'ta': 'Tamil', 'te': 'Telugu', 'ml': 'Malayalam',
+    'kn': 'Kannada', 'bn': 'Bengali', 'mr': 'Marathi', 'pa': 'Punjabi', 'gu': 'Gujarati',
+    'ur': 'Urdu', 'ja': 'Japanese', 'ko': 'Korean', 'zh': 'Chinese', 'cn': 'Cantonese',
+    'fr': 'French', 'es': 'Spanish', 'pt': 'Portuguese', 'de': 'German', 'it': 'Italian',
+    'tr': 'Turkish', 'th': 'Thai', 'ar': 'Arabic', 'ru': 'Russian',
+}
+
+
+def pick_language_name(data):
+    """'ta' -> 'Tamil'. Empty string when TMDB has no original language."""
+    code = ((data or {}).get('original_language') or '').strip().lower()
+    if not code:
+        return ''
+    for lang in (data or {}).get('spoken_languages') or []:
+        if (lang.get('iso_639_1') or '').lower() == code and lang.get('english_name'):
+            return lang['english_name']
+    return LANGUAGE_FALLBACK_NAMES.get(code, code.upper())
+
+
+def pick_writers(credits, limit=3):
+    """Names of writers/screenplay credits (falls back to story credits)."""
+    crew = (credits or {}).get('crew') or []
+    for jobs in (('Writer', 'Screenplay'), ('Story', 'Novel')):
+        names = []
+        for person in crew:
+            name = person.get('name')
+            if person.get('job') in jobs and name and name not in names:
+                names.append(name)
+        if names:
+            return ', '.join(names[:limit])
+    return ''
+
+
+def build_people_preview(cast, crew, limit=6, cast_slots=4):
+    """A short Cast & Crew strip: top cast, then key crew, one entry per person (roles combined)."""
+    merged = {}
+    order = []
+
+    def add(person, role):
+        entry = merged.get(person['id'])
+        if entry is None:
+            entry = merged[person['id']] = {
+                'id': person['id'],
+                'name': person['name'],
+                'photo': person.get('photo'),
+                'initials': person.get('initials') or person_initials(person['name']),
+                'roles': [],
+            }
+            order.append(entry)
+        if not entry['photo'] and person.get('photo'):
+            entry['photo'] = person['photo']
+        if role and role not in entry['roles']:
+            entry['roles'].append(role)
+
+    for person in cast[:cast_slots]:
+        add(person, person.get('character') or 'Cast')
+    for person in crew:
+        if person['id'] in merged:
+            add(person, person.get('job') or '')
+        elif len(order) < limit:
+            add(person, person.get('job') or '')
+    for person in cast[cast_slots:]:
+        if len(order) >= limit:
+            break
+        add(person, person.get('character') or 'Cast')
+
+    for entry in order:
+        entry['role'] = ' \u00b7 '.join(entry['roles'][:2])
+    return order[:limit]
+
+
+VIDEO_TYPE_RANK = {'Trailer': 0, 'Teaser': 1, 'Clip': 2, 'Featurette': 3, 'Behind the Scenes': 4}
+
+
+def build_media_videos(videos):
+    """YouTube videos for the Media card. group: 'trailers' (Trailer, Teaser) or 'clips' (the rest).
+
+    TMDB does not return durations, so none are invented here.
+    """
+    items = []
+    seen = set()
+    for clip in (videos or {}).get('results') or []:
+        key = clip.get('key')
+        if clip.get('site') != 'YouTube' or not key or key in seen:
+            continue
+        seen.add(key)
+        kind = clip.get('type') or 'Clip'
+        items.append({
+            'key': key,
+            'name': clip.get('name') or kind,
+            'type': kind,
+            'group': 'trailers' if kind in ('Trailer', 'Teaser') else 'clips',
+            'official': bool(clip.get('official')),
+            'url': f'https://www.youtube.com/watch?v={key}',
+            'thumb': f'https://img.youtube.com/vi/{key}/hqdefault.jpg',
+        })
+    items.sort(key=lambda item: (VIDEO_TYPE_RANK.get(item['type'], 9), 0 if item['official'] else 1))
+    return items
+
+
 def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
     """Map TMDB movie JSON into the template-friendly shape used across the app."""
     if not data or not data.get('id'):
@@ -292,66 +707,7 @@ def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
             director = person.get('name', 'N/A')
             break
 
-    cast = []
-    for person in (credits.get('cast') or [])[:10]:
-        if not person.get('id'):
-            continue
-        cast.append({
-            'id': str(person['id']),
-            'name': person.get('name') or 'Unknown',
-            'character': person.get('character') or '',
-            'photo': tmdb_poster_url(person.get('profile_path'), size='w185') if person.get('profile_path') else None,
-        })
-
-    # Prefer key production roles; keep order by importance, unique by name+job
-    preferred_jobs = (
-        'Director', 'Screenplay', 'Writer', 'Story', 'Novel',
-        'Director of Photography', 'Original Music Composer', 'Music',
-        'Producer', 'Executive Producer', 'Editor', 'Costume Design', 'Production Design',
-    )
-    job_rank = {job: i for i, job in enumerate(preferred_jobs)}
-    crew_candidates = []
-    seen = set()
-    for person in credits.get('crew') or []:
-        if not person.get('id'):
-            continue
-        job = person.get('job') or ''
-        if job not in job_rank:
-            continue
-        key = (person.get('id'), job)
-        if key in seen:
-            continue
-        seen.add(key)
-        crew_candidates.append({
-            'id': str(person['id']),
-            'name': person.get('name') or 'Unknown',
-            'job': job,
-            'photo': tmdb_poster_url(person.get('profile_path'), size='w185') if person.get('profile_path') else None,
-            '_rank': job_rank[job],
-        })
-    crew_candidates.sort(key=lambda item: (item['_rank'], item['name']))
-    crew = []
-    for item in crew_candidates[:12]:
-        item.pop('_rank', None)
-        crew.append(item)
-    # Fallback: if preferred list is thin, add first remaining crew
-    if len(crew) < 6:
-        for person in credits.get('crew') or []:
-            if not person.get('id'):
-                continue
-            job = person.get('job') or 'Crew'
-            key = (person.get('id'), job)
-            if key in seen:
-                continue
-            seen.add(key)
-            crew.append({
-                'id': str(person['id']),
-                'name': person.get('name') or 'Unknown',
-                'job': job,
-                'photo': tmdb_poster_url(person.get('profile_path'), size='w185') if person.get('profile_path') else None,
-            })
-            if len(crew) >= 12:
-                break
+    cast, crew = build_cast_and_crew(credits)
 
     trailer_url = resolve_trailer_url(
         'movie',
@@ -362,7 +718,7 @@ def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
     )
 
     similar = []
-    for item in ((recommendations or data.get('recommendations') or {}).get('results') or [])[:10]:
+    for item in ((recommendations or data.get('recommendations') or {}).get('results') or [])[:12]:
         if not item.get('id'):
             continue
         release_item = item.get('release_date') or ''
@@ -380,11 +736,49 @@ def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
     tmdb_id = str(data['id'])
 
     release_label = None
+    release_short = None
     if release:
         try:
-            release_label = datetime.strptime(release, '%Y-%m-%d').strftime('%B %d, %Y')
+            parsed_release = datetime.strptime(release, '%Y-%m-%d')
+            release_label = parsed_release.strftime('%B %d, %Y')
+            release_short = parsed_release.strftime('%d %b %Y')
         except ValueError:
             release_label = release
+            release_short = release
+
+    countries = [c.get('name') for c in (data.get('production_countries') or []) if c.get('name')]
+    media_videos = build_media_videos(videos or data.get('videos'))
+
+    genre_list = [g.get('name') for g in genres if g.get('name')]
+    certification = pick_certification(data.get('release_dates'))
+    runtime_short = format_runtime_short(runtime)
+    meta_parts = []
+    if year and year != 'N/A':
+        meta_parts.append(year)
+    meta_parts.extend(genre_list[:3])
+    if certification:
+        meta_parts.append(certification)
+    if runtime_short:
+        meta_parts.append(runtime_short)
+
+    images = data.get('images') or {}
+    backdrop_path = data.get('backdrop_path')
+    backdrop_gallery = [
+        {
+            'thumb': tmdb_poster_url(item['file_path'], size='w780'),
+            'full': tmdb_poster_url(item['file_path'], size='w1280'),
+        }
+        for item in (images.get('backdrops') or [])[:40]
+        if item.get('file_path')
+    ]
+    poster_gallery = [
+        {
+            'thumb': tmdb_poster_url(item['file_path'], size='w342'),
+            'full': tmdb_poster_url(item['file_path'], size='w780'),
+        }
+        for item in (images.get('posters') or [])[:30]
+        if item.get('file_path')
+    ]
 
     return {
         'Title': data.get('title') or data.get('original_title') or 'Untitled',
@@ -405,6 +799,22 @@ def normalize_tmdb_movie(data, credits=None, videos=None, recommendations=None):
         'Crew': crew,
         'Trailer': trailer_url,
         'Similar': similar,
+        'Tagline': (data.get('tagline') or '').strip(),
+        'Logo': pick_title_logo(images),
+        'Certification': certification,
+        'RuntimeShort': runtime_short,
+        'GenreList': genre_list,
+        'MetaParts': meta_parts,
+        'BackdropW780': tmdb_poster_url(backdrop_path, size='w780') if backdrop_path else None,
+        'BackdropW1280': tmdb_poster_url(backdrop_path, size='w1280') if backdrop_path else None,
+        'Backdrops': backdrop_gallery,
+        'Posters': poster_gallery,
+        'Language': pick_language_name(data),
+        'Country': ', '.join(countries[:2]),
+        'Writers': pick_writers(credits),
+        'ReleaseShort': release_short,
+        'PeoplePreview': build_people_preview(cast, crew, limit=12, cast_slots=8),
+        'Videos': media_videos,
     }
 
 
@@ -453,8 +863,15 @@ def fetch_watch_providers(tmdb_id, regions=('IN', 'US'), media_type='movie'):
     }
 
 
+def _provider_base_name(name):
+    """'Amazon Prime Video with Ads' -> 'Amazon Prime Video' so one service = one card."""
+    cleaned = re.sub(r'\s+(standard\s+)?with\s+ads$', '', (name or '').strip(), flags=re.I)
+    cleaned = re.sub(r'\s+ad[-\s]?supported$', '', cleaned, flags=re.I)
+    return cleaned.strip() or (name or '').strip()
+
+
 def build_watch_online_cards(watch_providers, limit=8):
-    """Flatten TMDB watch providers into card rows for the Watch Online UI."""
+    """Flatten TMDB watch providers into one card per streaming service."""
     if not watch_providers:
         return []
 
@@ -466,26 +883,36 @@ def build_watch_online_cards(watch_providers, limit=8):
         ('rent', 'Rent'),
         ('buy', 'Buy'),
     )
-    seen = set()
-    cards = []
+    groups = {}
     for key, label in buckets:
         for provider in watch_providers.get(key) or []:
-            name = (provider.get('name') or '').strip()
-            if not name:
+            raw_name = (provider.get('name') or '').strip()
+            if not raw_name:
                 continue
-            key_name = name.lower()
-            if key_name in seen:
-                continue
-            seen.add(key_name)
-            cards.append({
-                'name': name,
-                'logo': provider.get('logo'),
-                'label': label,
-                'url': link,
-            })
-            if len(cards) >= limit:
-                return cards
-    return cards
+            base = _provider_base_name(raw_name)
+            group = groups.get(base.lower())
+            if group is None:
+                group = groups[base.lower()] = {
+                    'name': base,
+                    'logo': provider.get('logo'),
+                    'labels': [],
+                    'url': link,
+                }
+            elif not group['logo'] and provider.get('logo'):
+                group['logo'] = provider.get('logo')
+            if label not in group['labels']:
+                group['labels'].append(label)
+
+    cards = [
+        {
+            'name': group['name'],
+            'logo': group['logo'],
+            'label': ' \u00b7 '.join(group['labels']),
+            'url': group['url'],
+        }
+        for group in groups.values()
+    ]
+    return cards[:limit]
 
 
 # Preferred JustWatch regions when looking up OTT logos for a language.
@@ -558,7 +985,8 @@ def fetch_movie_by_id(tmdb_id):
         return None
     data = tmdb_get(
         f'/movie/{tmdb_id}',
-        append_to_response='credits,videos,recommendations'
+        append_to_response='credits,videos,recommendations,images,release_dates',
+        include_image_language='en,null',
     )
     # Heavy append_to_response can fail intermittently — fall back to separate calls
     if not data:
@@ -780,7 +1208,100 @@ def normalize_tmdb_tv(data):
         data.get('videos'),
     )
 
+    # Cast, crew, media, similar shows and the "meta" strip used by the redesigned detail page.
+    credits = data.get('credits') or {}
+    cast, crew = build_cast_and_crew(credits)
+    genre_list = [g.get('name') for g in (data.get('genres') or []) if g.get('name')]
+    certification = ''
+    for entry in (data.get('content_ratings') or {}).get('results') or []:
+        if entry.get('iso_3166_1') in ('IN', 'US') and (entry.get('rating') or '').strip():
+            certification = entry['rating'].strip()
+            if entry['iso_3166_1'] == 'IN':
+                break
+
+    runtimes = [r for r in (data.get('episode_run_time') or []) if r]
+    ep_runtime = runtimes[0] if runtimes else None
+    if not ep_runtime and (data.get('last_episode_to_air') or {}).get('runtime'):
+        ep_runtime = data['last_episode_to_air']['runtime']
+    runtime_short = format_runtime_short(ep_runtime)
+
+    season_count = data.get('number_of_seasons') or len(seasons)
+    meta_parts = []
+    if year and year != 'N/A':
+        meta_parts.append(year)
+    meta_parts.extend(genre_list[:3])
+    if certification:
+        meta_parts.append(certification)
+    if season_count:
+        meta_parts.append(f"{season_count} season{'' if season_count == 1 else 's'}")
+    if runtime_short:
+        meta_parts.append(runtime_short)
+
+    first_air_short = None
+    if first_air:
+        try:
+            first_air_short = datetime.strptime(first_air, '%Y-%m-%d').strftime('%d %b %Y')
+        except ValueError:
+            first_air_short = first_air
+
+    similar = []
+    for item in ((data.get('recommendations') or {}).get('results') or [])[:12]:
+        if not item.get('id'):
+            continue
+        item_air = item.get('first_air_date') or ''
+        similar.append({
+            'Title': item.get('name') or item.get('original_name') or 'Untitled',
+            'Year': item_air[:4] if item_air else 'N/A',
+            'Poster': tmdb_poster_url(item.get('poster_path')),
+            'tmdb_id': str(item['id']),
+        })
+
+    images = data.get('images') or {}
+    backdrop_path = data.get('backdrop_path')
+    backdrop_gallery = [
+        {
+            'thumb': tmdb_poster_url(item['file_path'], size='w780'),
+            'full': tmdb_poster_url(item['file_path'], size='w1280'),
+        }
+        for item in (images.get('backdrops') or [])[:40]
+        if item.get('file_path')
+    ]
+    poster_gallery = [
+        {
+            'thumb': tmdb_poster_url(item['file_path'], size='w342'),
+            'full': tmdb_poster_url(item['file_path'], size='w780'),
+        }
+        for item in (images.get('posters') or [])[:30]
+        if item.get('file_path')
+    ]
+    creators = ', '.join(c.get('name') for c in (data.get('created_by') or [])[:3] if c.get('name'))
+    networks = ', '.join(n.get('name') for n in (data.get('networks') or [])[:2] if n.get('name'))
+    countries = [c for c in (data.get('origin_country') or []) if c]
+    if not countries:
+        countries = [c.get('name') for c in (data.get('production_countries') or []) if c.get('name')]
+
     return {
+        'Cast': cast,
+        'Crew': crew,
+        'PeoplePreview': build_people_preview(cast, crew, limit=12, cast_slots=8),
+        'Similar': similar,
+        'Videos': build_media_videos(data.get('videos')),
+        'Backdrops': backdrop_gallery,
+        'Posters': poster_gallery,
+        'BackdropW780': tmdb_poster_url(backdrop_path, size='w780') if backdrop_path else None,
+        'BackdropW1280': tmdb_poster_url(backdrop_path, size='w1280') if backdrop_path else None,
+        'Logo': pick_title_logo(images),
+        'Tagline': (data.get('tagline') or '').strip(),
+        'GenreList': genre_list,
+        'MetaParts': meta_parts,
+        'Certification': certification,
+        'RuntimeShort': runtime_short,
+        'Language': pick_language_name(data),
+        'Country': ', '.join(countries[:2]),
+        'Creators': creators,
+        'Networks': networks,
+        'FirstAirShort': first_air_short,
+        'episode_total': data.get('number_of_episodes') or 0,
         'Title': data.get('name') or data.get('original_name') or 'Untitled',
         'Year': year,
         'FirstAirDate': first_air,
@@ -803,7 +1324,8 @@ def fetch_tv_by_id(tmdb_id):
         return None
     data = tmdb_get(
         f'/tv/{tmdb_id}',
-        append_to_response='videos',
+        append_to_response='videos,credits,recommendations,images,content_ratings',
+        include_image_language='en,null',
         language='en-US',
     )
     if not data:
@@ -812,6 +1334,14 @@ def fetch_tv_by_id(tmdb_id):
         data = tmdb_get(f'/tv/{tmdb_id}')
     if not data:
         return None
+    # Heavy append_to_response can fail intermittently: fill gaps with separate calls.
+    if not data.get('credits') or not data.get('recommendations'):
+        extras = tmdb_get_many([
+            (f'/tv/{tmdb_id}/credits', {'language': 'en-US'}),
+            (f'/tv/{tmdb_id}/recommendations', {'language': 'en-US'}),
+        ])
+        data['credits'] = data.get('credits') or extras[0] or {}
+        data['recommendations'] = data.get('recommendations') or extras[1] or {}
     # If videos were missing from the primary payload, fetch them separately
     if not (data.get('videos') or {}).get('results'):
         videos = tmdb_get(f'/tv/{tmdb_id}/videos', language='en-US') or tmdb_get(f'/tv/{tmdb_id}/videos')
@@ -1987,62 +2517,229 @@ def parse_rating(value, default=None):
     return rating
 
 
-def upsert_diary_for_rating(user_id, title, poster, imdb_id, rating, review=None, watched_date=None):
-    """Create or update today's diary entry when a film is rated/reviewed."""
-    watched_date = watched_date or date.today()
-    review_text = (review or '').strip() or None
+# ---------------------------------------------------------------------------
+# Diary: one write path for ratings, reviews and diary entries
+#
+# Post (rating + review text) stays the record the film page, stats and community
+# read from. DiaryEntry is the user's personal log and mirrors rating/review from
+# that Post. Both are only ever written by save_film_log(), inside ONE transaction,
+# and a unique index on (user_id, imdb_id) blocks duplicate entries.
+# ---------------------------------------------------------------------------
+REVIEW_PLACEHOLDER = 'Rated '
+REVIEW_MAX_LENGTH = 1000
+
+
+def real_review_text(post):
+    """The user's written review, or None when the Post only holds the auto 'Rated X.' text."""
+    body = ((post.content if post else '') or '').strip()
+    if not body or body.startswith(REVIEW_PLACEHOLDER):
+        return None
+    return body
+
+
+def parse_watched_date(raw, default=None):
+    """Return (date, error). Blank -> default. Future or malformed dates are rejected."""
+    raw = (raw or '').strip()
+    if not raw:
+        return default, None
+    try:
+        value = datetime.strptime(raw, '%Y-%m-%d').date()
+    except ValueError:
+        return None, 'Enter a valid date.'
+    if value > date.today():
+        return None, 'The watched date cannot be in the future.'
+    return value, None
+
+
+def find_diary_entry(user_id, imdb_id, title=None):
+    query = DiaryEntry.query.filter_by(user_id=user_id)
+    if imdb_id:
+        entry = query.filter_by(imdb_id=str(imdb_id)).first()
+        if entry or not title:
+            return entry
+        # Older rows were saved without a film id; adopt them by title.
+        return query.filter(DiaryEntry.title == title, DiaryEntry.imdb_id.is_(None)).first()
+    if title:
+        return query.filter(DiaryEntry.title == title).first()
+    return None
+
+
+def find_user_post(user_id, imdb_id, title=None):
+    conditions = []
+    if imdb_id:
+        conditions.append(Post.imdb_id == str(imdb_id))
+    if title:
+        conditions.append(Post.movie == title)
+    if not conditions:
+        return None
+    return (
+        Post.query.filter(Post.user_id == user_id, db.or_(*conditions))
+        .order_by(Post.created_at.desc(), Post.id.desc())
+        .first()
+    )
+
+
+def run_in_transaction(work):
+    """Run work() then commit. A unique-index race (double click) is retried once, then re-raised."""
+    for attempt in range(2):
+        try:
+            result = work()
+            db.session.commit()
+            return result
+        except IntegrityError:
+            db.session.rollback()
+            if attempt:
+                raise
+
+
+def save_film_log(user_id, *, imdb_id, title, poster=None, year=None, rating=None,
+                  review=None, is_rewatch=None, has_spoilers=None, watched_date=None,
+                  post=None, entry=None):
+    """Create or update the user's rating/review Post, diary entry and watched mark together.
+
+    Arguments left as None are not touched. review='' clears the written review (rating stays).
+    The caller commits (use run_in_transaction) so everything lands in one transaction.
+    """
     film_id = str(imdb_id) if imdb_id else None
+    poster = poster_or_placeholder(poster)
+    review_text = None if review is None else review.strip()
+    if review_text is not None and len(review_text) > REVIEW_MAX_LENGTH:
+        raise ValueError(f'Reviews are limited to {REVIEW_MAX_LENGTH} characters.')
+    if rating is not None and not 1 <= int(rating) <= 10:
+        raise ValueError('Rating must be between 1 and 10.')
 
-    entry = None
-    if film_id:
-        entry = DiaryEntry.query.filter_by(
-            user_id=user_id,
-            imdb_id=film_id,
-            watched_date=watched_date,
-        ).first()
-    if not entry:
-        entry = DiaryEntry.query.filter_by(
-            user_id=user_id,
-            title=title,
-            watched_date=watched_date,
-        ).first()
-
-    if entry:
-        entry.rating = rating
-        if review_text:
-            entry.review = review_text
-        entry.poster_url = poster
-        if film_id:
-            entry.imdb_id = film_id
-    else:
-        prior_q = DiaryEntry.query.filter_by(user_id=user_id)
-        if film_id:
-            prior = prior_q.filter(
-                db.or_(DiaryEntry.imdb_id == film_id, DiaryEntry.title == title)
-            ).first()
+    post = post or find_user_post(user_id, film_id, title)
+    if rating is not None:
+        if post is None:
+            post = Post(
+                movie=title, content=review_text or f'{REVIEW_PLACEHOLDER}{title}.',
+                rating=rating, poster_url=poster, imdb_id=film_id, user_id=user_id,
+            )
+            db.session.add(post)
         else:
-            prior = prior_q.filter_by(title=title).first()
+            post.rating = rating
+            post.poster_url = poster
+            if film_id:
+                post.imdb_id = film_id
+    if post is not None:
+        if review_text is not None:
+            post.content = review_text or f'{REVIEW_PLACEHOLDER}{title}.'
+        if is_rewatch is not None:
+            post.is_rewatch = bool(is_rewatch)
+        if has_spoilers is not None:
+            post.has_spoilers = bool(has_spoilers) and bool(real_review_text(post))
+        elif not real_review_text(post):
+            post.has_spoilers = False
+
+    entry = entry or find_diary_entry(user_id, film_id, title)
+    if entry is None:
         entry = DiaryEntry(
-            title=title,
-            rating=rating,
-            review=review_text,
-            watched_date=watched_date,
-            poster_url=poster,
-            user_id=user_id,
-            imdb_id=film_id,
-            is_rewatch=bool(prior),
+            user_id=user_id, title=title, imdb_id=film_id, is_rewatch=False,
+            watched_date=watched_date or date.today(),
         )
         db.session.add(entry)
+    elif watched_date:
+        entry.watched_date = watched_date
+    entry.title = title
+    entry.poster_url = poster
+    if film_id:
+        entry.imdb_id = film_id
+    if year:
+        entry.release_year = str(year)[:4]
+    if is_rewatch is not None:
+        entry.is_rewatch = bool(is_rewatch)
+    if post is not None:
+        entry.rating = post.rating
+        entry.review = real_review_text(post)
+    elif review_text is not None:
+        entry.review = review_text or None
+    if film_id:
+        entry.recommend = True if Recommendation.query.filter_by(
+            user_id=user_id, media_type='movie', tmdb_id=film_id
+        ).first() else None
 
     if film_id and not WatchedFilm.query.filter_by(user_id=user_id, tmdb_id=film_id).first():
-        db.session.add(WatchedFilm(
-            user_id=user_id,
-            tmdb_id=film_id,
-            title=title,
-            poster_url=poster,
-        ))
-
+        db.session.add(WatchedFilm(user_id=user_id, tmdb_id=film_id, title=title, poster_url=poster))
     return entry
+
+
+def remove_film_log(user_id, entry):
+    """'Remove from diary': drops the entry plus this user's rating and review of the film."""
+    posts = Post.query.filter(Post.user_id == user_id)
+    conditions = [Post.movie == entry.title]
+    if entry.imdb_id:
+        conditions.append(Post.imdb_id == str(entry.imdb_id))
+    for post in posts.filter(db.or_(*conditions)).all():
+        Comment.query.filter_by(post_id=post.id).delete()
+        PostLike.query.filter_by(post_id=post.id).delete()
+        db.session.delete(post)
+    db.session.delete(entry)
+
+
+def resync_diary_after_post_change(user_id, imdb_id, title):
+    """After a Post was cleared/deleted: mirror what is left onto the diary entry (or drop it)."""
+    entry = find_diary_entry(user_id, imdb_id, title)
+    if entry is None:
+        return
+    post = find_user_post(user_id, imdb_id or entry.imdb_id, title)
+    if post is not None:
+        entry.rating = post.rating
+        entry.review = real_review_text(post)
+    elif entry.rating is not None and entry.review:
+        pass  # manual diary entry that never had a Post: keep as logged
+    else:
+        db.session.delete(entry)
+
+
+def diary_entry_json(entry):
+    return {
+        'id': entry.id,
+        'film_id': entry.imdb_id,
+        'title': entry.title,
+        'year': entry.release_year,
+        'poster': entry.poster_url,
+        'rating': entry.rating,
+        'review': entry.review,
+        'recommend': entry.recommend,
+        'is_rewatch': bool(entry.is_rewatch),
+        'watched_date': entry.watched_date.isoformat() if entry.watched_date else None,
+        'created_at': entry.created_at.isoformat() if entry.created_at else None,
+        'updated_at': entry.updated_at.isoformat() if entry.updated_at else None,
+    }
+
+
+def backfill_diary_from_posts():
+    """Create a diary entry for every existing rating/review. Idempotent: existing entries are skipped."""
+    created = 0
+    seen = set()
+    posts = Post.query.order_by(Post.created_at.desc(), Post.id.desc()).all()
+    for post in posts:
+        key = (post.user_id, str(post.imdb_id) if post.imdb_id else post.movie)
+        if key in seen:
+            continue
+        seen.add(key)
+        if find_diary_entry(post.user_id, post.imdb_id, post.movie):
+            continue
+        posted = post.created_at or datetime.utcnow()
+        db.session.add(DiaryEntry(
+            user_id=post.user_id, title=post.movie, poster_url=post.poster_url,
+            imdb_id=str(post.imdb_id) if post.imdb_id else None,
+            rating=post.rating, review=real_review_text(post),
+            watched_date=min(posted.date(), date.today()),
+            is_rewatch=bool(post.is_rewatch),
+            recommend=True if post.imdb_id and Recommendation.query.filter_by(
+                user_id=post.user_id, media_type='movie', tmdb_id=str(post.imdb_id)).first() else None,
+            created_at=posted, updated_at=posted,
+        ))
+        if post.imdb_id and not WatchedFilm.query.filter_by(
+                user_id=post.user_id, tmdb_id=str(post.imdb_id)).first():
+            db.session.add(WatchedFilm(
+                user_id=post.user_id, tmdb_id=str(post.imdb_id), title=post.movie,
+                poster_url=post.poster_url, watched_at=posted,
+            ))
+        created += 1
+    db.session.commit()
+    return created
 
 
 def user_profile_stats(user_id):
@@ -2056,25 +2753,10 @@ def user_profile_stats(user_id):
 
 
 def sync_user_film_logs(user_id):
-    """Backfill this user's diary + watched rows from their reviews. Never touches other users."""
-    posts = Post.query.filter_by(user_id=user_id).order_by(Post.created_at.asc()).all()
-    for post in posts:
-        if not post.rating:
-            continue
-        review_text = post.content or ''
-        if review_text.startswith('Rated '):
-            review_text = ''
-        watched_on = post.created_at.date() if post.created_at else date.today()
-        upsert_diary_for_rating(
-            user_id=user_id,
-            title=post.movie,
-            poster=poster_or_placeholder(post.poster_url),
-            imdb_id=post.imdb_id,
-            rating=post.rating,
-            review=review_text or None,
-            watched_date=watched_on,
-        )
+    """Backfill this user's watched rows from their diary. Never touches other users.
 
+    Reviews and ratings do NOT create diary entries; the diary only holds films the user logged on purpose.
+    """
     entries = DiaryEntry.query.filter_by(user_id=user_id).all()
     for entry in entries:
         film_id = str(entry.imdb_id) if entry.imdb_id else None
@@ -2092,6 +2774,22 @@ def sync_user_film_logs(user_id):
     db.session.commit()
 
 
+@app.template_filter('compact')
+def compact_number(value):
+    """1234 -> '1.2K', 4200000 -> '4.2M'."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return '0'
+    for limit, suffix in ((1e9, 'B'), (1e6, 'M'), (1e3, 'K')):
+        if abs(number) >= limit:
+            text = f'{number / limit:.1f}'
+            if text.endswith('.0'):
+                text = text[:-2]
+            return text + suffix
+    return str(int(number))
+
+
 def render_view(view, **context):
     """Render the single combined template for a named view."""
     return render_template('app.html', view=view, **context)
@@ -2106,6 +2804,8 @@ def ensure_schema():
         ("diary_entry", "imdb_id", "VARCHAR(20)"),
         ("diary_entry", "is_rewatch", "BOOLEAN DEFAULT 0"),
         ("post", "imdb_id", "VARCHAR(20)"),
+        ("post", "is_rewatch", "BOOLEAN DEFAULT 0"),
+        ("post", "has_spoilers", "BOOLEAN DEFAULT 0"),
         ("list_movie", "year", "VARCHAR(10)"),
         ("list_movie", "note", "TEXT"),
         ("list_movie", "imdb_id", "VARCHAR(20)"),
@@ -2116,6 +2816,14 @@ def ensure_schema():
         ("community_post", "media_url", "VARCHAR(300)"),
         ("community_post", "media_type", "VARCHAR(10)"),
         ("community_post", "is_seed", "BOOLEAN DEFAULT 0"),
+        # Watchlist can now hold series too; old rows are films.
+        ("watchlist", "media_type", "VARCHAR(10) DEFAULT 'movie'"),
+        ("watchlist", "tmdb_id", "VARCHAR(20)"),
+        # Diary: one auto-synced entry per user per film
+        ("diary_entry", "recommend", "BOOLEAN"),
+        ("diary_entry", "release_year", "VARCHAR(4)"),
+        ("diary_entry", "created_at", "DATETIME"),
+        ("diary_entry", "updated_at", "DATETIME"),
     ]
     with db.engine.connect() as conn:
         for table, column, coltype in alterations:
@@ -2124,7 +2832,36 @@ def ensure_schema():
                 conn.commit()
             except Exception:
                 conn.rollback()
+        # Old rows: created/updated = the day they were watched.
+        try:
+            conn.execute(text(
+                "UPDATE diary_entry SET created_at = watched_date WHERE created_at IS NULL"
+            ))
+            conn.execute(text(
+                "UPDATE diary_entry SET updated_at = COALESCE(created_at, watched_date) WHERE updated_at IS NULL"
+            ))
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        # Indexes. The unique one cannot be built if old data already holds duplicates;
+        # nothing is deleted in that case, the app logic still prevents new duplicates.
+        for statement in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_diary_user_film ON diary_entry (user_id, imdb_id)",
+            "CREATE INDEX IF NOT EXISTS ix_diary_user_watched ON diary_entry (user_id, watched_date)",
+        ):
+            try:
+                conn.execute(text(statement))
+                conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                print(f'[schema] skipped index ({exc.__class__.__name__}): {statement}')
     purge_community_seed_data()
+    # One-time backfill: every existing rating/review gets a diary entry.
+    if not db.session.get(SchemaFlag, 'diary_backfill_v1'):
+        added = backfill_diary_from_posts()
+        db.session.add(SchemaFlag(name='diary_backfill_v1'))
+        db.session.commit()
+        print(f'[schema] diary backfill created {added} entries')
 
 
 def relative_stack_updated(when):
@@ -2199,6 +2936,20 @@ def inject_user():
     return dict(current_user=current_user)
 
 
+@app.url_defaults
+def add_static_version(endpoint, values):
+    """Append ?v=<file mtime> to static URLs so browsers pick up CSS/JS edits right away."""
+    if endpoint != 'static' or 'v' in values:
+        return
+    filename = values.get('filename')
+    if not filename:
+        return
+    try:
+        values['v'] = int(os.path.getmtime(os.path.join(app.static_folder, filename)))
+    except (OSError, TypeError):
+        pass
+
+
 # ------------------ Models ------------------ #
 follows = db.Table('follows',
     db.Column('follower_id', db.Integer, db.ForeignKey('user.id')),
@@ -2251,6 +3002,20 @@ class Watchlist(db.Model):
     title = db.Column(db.String(200), nullable=False)
     poster_url = db.Column(db.String(300))
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    media_type = db.Column(db.String(10), default='movie')  # 'movie' or 'tv'
+    tmdb_id = db.Column(db.String(20))
+
+
+class Recommendation(db.Model):
+    """One 'I recommend this' mark per user per film or series."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    media_type = db.Column(db.String(10), nullable=False)  # 'movie' or 'tv'
+    tmdb_id = db.Column(db.String(20), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'media_type', 'tmdb_id', name='uq_recommendation'),
+    )
 
 
 class Post(db.Model):
@@ -2262,6 +3027,8 @@ class Post(db.Model):
     imdb_id = db.Column(db.String(20))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     likes = db.Column(db.Integer, default=0)
+    is_rewatch = db.Column(db.Boolean, default=False)    # "I've watched this before"
+    has_spoilers = db.Column(db.Boolean, default=False)  # review text is hidden until revealed
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
 
@@ -2330,6 +3097,22 @@ class DiaryEntry(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     imdb_id = db.Column(db.String(20))
     is_rewatch = db.Column(db.Boolean, default=False)
+    recommend = db.Column(db.Boolean)            # NULL = no opinion recorded
+    release_year = db.Column(db.String(4))       # lets the diary render without TMDB calls
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # One entry per user per film (TMDB id). Title-only legacy rows have NULL imdb_id and are exempt.
+    __table_args__ = (
+        db.Index('uq_diary_user_film', 'user_id', 'imdb_id', unique=True),
+        db.Index('ix_diary_user_watched', 'user_id', 'watched_date'),
+    )
+
+
+class SchemaFlag(db.Model):
+    """Marks one-off data migrations (e.g. the diary backfill) as done."""
+    name = db.Column(db.String(60), primary_key=True)
+    done_at = db.Column(db.DateTime, default=datetime.utcnow)
 
 
 class FavoriteFilm(db.Model):
@@ -2951,12 +3734,12 @@ def login():
             login_user(user)
             flash('Login successful!', 'success')
             next_page = request.args.get('next')
-            if next_page and next_page.startswith('/'):
+            if next_page and next_page.startswith('/') and not next_page.startswith(('//', '/\\')):
                 return redirect(next_page)
             return redirect(url_for('home'))
 
         flash('Invalid email or password.', 'danger')
-        return redirect(url_for('login'))
+        return redirect(url_for('login', next=request.args.get('next')) if request.args.get('next') else url_for('login'))
 
     return render_view('login')
 
@@ -2967,6 +3750,143 @@ def logout():
     logout_user()
     flash('Logged out.', 'info')
     return redirect(url_for('home'))
+
+
+# ------------------ Recommend + Watchlist (films and series) ------------------ #
+
+def watchlist_match(media_type, tmdb_id, title=None):
+    """SQL condition matching one title in Watchlist. Older film rows only have a title, so match those too."""
+    tmdb_id = str(tmdb_id)
+    if media_type == 'tv':
+        return and_(Watchlist.media_type == 'tv', Watchlist.tmdb_id == tmdb_id)
+    options = [Watchlist.tmdb_id == tmdb_id]
+    if title:
+        options.append(and_(Watchlist.tmdb_id.is_(None), Watchlist.title == title))
+    return and_(or_(Watchlist.media_type.is_(None), Watchlist.media_type != 'tv'), or_(*options))
+
+
+def engage_copy(kind, active, count):
+    """Text for the Recommend / Watchlist buttons. Used by the templates and by the JSON replies."""
+    number = compact_number(count)
+    if kind == 'recommend':
+        if count:
+            sub = f"{number} {'person recommends' if count == 1 else 'people recommend'} it"
+        else:
+            sub = 'Be the first to recommend'
+        label = 'Recommended' if active else 'Recommend'
+    else:
+        sub = f"{'Fan' if count == 1 else 'Fans'} added to watchlist"
+        label = 'In your Watchlist' if active else 'Watchlist'
+    return {'active': bool(active), 'count': count, 'value': number, 'label': label, 'sub': sub}
+
+
+app.jinja_env.globals['engage_copy'] = engage_copy
+
+
+def engage_state(media_type, tmdb_id, title=None):
+    """Counts plus the signed-in user's own state for the Recommend and Watchlist buttons."""
+    tmdb_id = str(tmdb_id)
+    recommend_count = Recommendation.query.filter_by(media_type=media_type, tmdb_id=tmdb_id).count()
+    watch_filter = watchlist_match(media_type, tmdb_id, title)
+    watchlist_count = db.session.query(func.count(func.distinct(Watchlist.user_id))).filter(watch_filter).scalar() or 0
+    recommended = on_watchlist = False
+    if current_user.is_authenticated:
+        recommended = Recommendation.query.filter_by(
+            user_id=current_user.id, media_type=media_type, tmdb_id=tmdb_id
+        ).first() is not None
+        on_watchlist = Watchlist.query.filter(Watchlist.user_id == current_user.id, watch_filter).first() is not None
+    return {
+        'recommend': engage_copy('recommend', recommended, recommend_count),
+        'watchlist': engage_copy('watchlist', on_watchlist, watchlist_count),
+    }
+
+
+def wants_json():
+    return request.headers.get('X-Requested-With') == 'fetch' or request.accept_mimetypes.best == 'application/json'
+
+
+def toggle_engagement(media_type, action, tmdb_id):
+    """Flip the current user's Recommend or Watchlist mark. Replies with JSON for fetch(), a redirect otherwise."""
+    is_tv = media_type == 'tv'
+    back = url_for('series_page', tmdb_id=tmdb_id) if is_tv else url_for('film_page', imdb_id=tmdb_id)
+
+    if not current_user.is_authenticated:
+        login_url = url_for('login', next=back)
+        if wants_json():
+            return jsonify(ok=False, login=login_url, message='Sign in to do that.'), 401
+        return redirect(login_url)
+
+    item = fetch_tv_by_id(tmdb_id) if is_tv else fetch_movie_by_id(tmdb_id)
+    if not item:
+        if wants_json():
+            return jsonify(ok=False, message='Not found.'), 404
+        flash('Series not found.' if is_tv else 'Film not found.', 'danger')
+        return redirect(url_for('series_index') if is_tv else url_for('home'))
+
+    title = item.get('Title')
+    tmdb_id = str(tmdb_id)
+
+    if action == 'recommend':
+        row = Recommendation.query.filter_by(
+            user_id=current_user.id, media_type=media_type, tmdb_id=tmdb_id
+        ).first()
+        if row:
+            db.session.delete(row)
+            message = 'Recommendation removed.'
+            recommended_now = False
+        else:
+            db.session.add(Recommendation(user_id=current_user.id, media_type=media_type, tmdb_id=tmdb_id))
+            recommended_now = True
+            message = 'Thanks! Marked as recommended.'
+        if media_type == 'movie':
+            # Keep the diary's recommend flag in step with the Recommend button.
+            logged = DiaryEntry.query.filter_by(user_id=current_user.id, imdb_id=tmdb_id).first()
+            if logged:
+                logged.recommend = True if recommended_now else None
+    else:
+        rows = Watchlist.query.filter(
+            Watchlist.user_id == current_user.id, watchlist_match(media_type, tmdb_id, title)
+        ).all()
+        if rows:
+            for row in rows:
+                db.session.delete(row)
+            message = 'Removed from your watchlist.'
+        else:
+            db.session.add(Watchlist(
+                title=title,
+                poster_url=item.get('Poster'),
+                user_id=current_user.id,
+                media_type=media_type,
+                tmdb_id=tmdb_id,
+            ))
+            message = 'Added to your watchlist.'
+    db.session.commit()
+
+    state = engage_state(media_type, tmdb_id, title)[action]
+    if wants_json():
+        return jsonify(ok=True, action=action, message=message, **state)
+    flash(message, 'success')
+    return redirect(back)
+
+
+@app.route('/film/<tmdb_id>/recommend', methods=['POST'])
+def film_recommend(tmdb_id):
+    return toggle_engagement('movie', 'recommend', tmdb_id)
+
+
+@app.route('/film/<tmdb_id>/watchlist', methods=['POST'])
+def film_watchlist(tmdb_id):
+    return toggle_engagement('movie', 'watchlist', tmdb_id)
+
+
+@app.route('/series/<tmdb_id>/recommend', methods=['POST'])
+def series_recommend(tmdb_id):
+    return toggle_engagement('tv', 'recommend', tmdb_id)
+
+
+@app.route('/series/<tmdb_id>/watchlist', methods=['POST'])
+def series_watchlist(tmdb_id):
+    return toggle_engagement('tv', 'watchlist', tmdb_id)
 
 
 @app.route('/film/<imdb_id>')
@@ -2985,23 +3905,43 @@ def film_page(imdb_id):
     reviews = film_reviews_for_title(title, tmdb_id)
     histogram = rating_histogram(reviews)
     like_count = FilmLike.query.filter_by(tmdb_id=str(tmdb_id)).count()
+    # Phase 1 stats come from existing data; Phase 2 moves this behind /api/film/<id>/stats.
+    rated_values = [post.rating for post in reviews if post.rating]
+    # Star buckets for the "Rating Breakdown" card: stored 1-10 (half stars) -> 1-5 stars, rounded up.
+    distribution = {star: 0 for star in range(1, 6)}
+    for value in rated_values:
+        distribution[min(5, max(1, int(-(-value // 2))))] += 1
+    film_stats = {
+        'distribution': distribution,
+        'rating_count': len(rated_values),
+        'avg_rating': round(sum(rated_values) / len(rated_values), 1) if rated_values else None,
+        'recommend_pct': None,
+    }
+    engage = engage_state('movie', tmdb_id, title)
+    film_stats['watchlist_count'] = engage['watchlist']['count']
+    review_previews = [
+        post for post in reviews
+        if post.content and not post.content.startswith('Rated ')
+    ]
     watch_providers = fetch_watch_providers(tmdb_id)
 
     in_watchlist = False
     user_rating = None
     user_review = ''
+    user_rewatch = False
+    user_spoilers = False
+    diary_entry = None
     liked = False
     watched = False
     user_lists = []
     if current_user.is_authenticated:
-        in_watchlist = Watchlist.query.filter_by(
-            user_id=current_user.id, title=title
-        ).first() is not None
-        own = Post.query.filter_by(user_id=current_user.id, movie=title).order_by(
-            Post.created_at.desc()
-        ).first()
+        in_watchlist = engage['watchlist']['active']
+        own = find_user_post(current_user.id, tmdb_id, title)
+        diary_entry = find_diary_entry(current_user.id, tmdb_id, title)
         if own:
             user_rating = own.rating
+            user_rewatch = bool(own.is_rewatch)
+            user_spoilers = bool(own.has_spoilers)
             # Hide auto placeholder text in the form
             if own.content and not own.content.startswith('Rated '):
                 user_review = own.content
@@ -3022,6 +3962,10 @@ def film_page(imdb_id):
         in_watchlist=in_watchlist,
         user_rating=user_rating,
         user_review=user_review,
+        user_rewatch=user_rewatch,
+        user_spoilers=user_spoilers,
+        diary_entry=diary_entry,
+        today_iso=date.today().isoformat(),
         liked=liked,
         watched=watched,
         user_lists=user_lists,
@@ -3029,6 +3973,9 @@ def film_page(imdb_id):
         watch_online=watch_online,
         is_upcoming=upcoming,
         cant_miss=cant_miss,
+        stats=film_stats,
+        engage=engage,
+        review_previews=review_previews,
     )
 
 
@@ -3114,6 +4061,7 @@ def series_page(tmdb_id):
         is_upcoming=upcoming,
         cant_miss=cant_miss,
         watch_online=watch_online,
+        engage=engage_state('tv', show.get('tmdb_id') or tmdb_id, show.get('Title')),
     )
 
 
@@ -3128,7 +4076,7 @@ def rate_episode(tmdb_id, season, episode):
     rating = parse_rating(request.form.get('rating'))
     if not rating:
         flash('Pick a rating between 1 and 10 stars (half steps).', 'warning')
-        return redirect(url_for('series_page', tmdb_id=tmdb_id, season=season))
+        return redirect(url_for('series_page', tmdb_id=tmdb_id, season=season, _anchor='episodes'))
 
     row = EpisodeRating.query.filter_by(
         user_id=current_user.id,
@@ -3155,7 +4103,7 @@ def rate_episode(tmdb_id, season, episode):
         f'Episode saved. Your series score is {overall:.1f}/10 ({stars:.1f}/5) from {count} rated episode{"s" if count != 1 else ""}.',
         'success',
     )
-    return redirect(url_for('series_page', tmdb_id=tmdb_id, season=season))
+    return redirect(url_for('series_page', tmdb_id=tmdb_id, season=season, _anchor='episodes'))
 
 
 @app.route('/person/<person_id>')
@@ -3329,52 +4277,33 @@ def log_film(imdb_id):
         rating = parse_rating(request.form.get('rating'))
         review = request.form.get('review', '').strip()
         is_rewatch = bool(request.form.get('is_rewatch'))
-        watched_raw = request.form.get('watched_date') or date.today().isoformat()
-        try:
-            watched_date = datetime.strptime(watched_raw, '%Y-%m-%d').date()
-        except ValueError:
-            watched_date = date.today()
+        watched_date, date_error = parse_watched_date(request.form.get('watched_date'), date.today())
+        if date_error or len(review) > REVIEW_MAX_LENGTH:
+            flash(date_error or f"Reviews are limited to {REVIEW_MAX_LENGTH} characters.", "warning")
+            return redirect(url_for('log_film', imdb_id=imdb_id))
 
         title = movie.get('Title')
-        poster = poster_or_placeholder(movie.get('Poster'))
 
-        entry = DiaryEntry(
-            title=title,
-            rating=rating,
-            review=review or None,
-            watched_date=watched_date,
-            poster_url=poster,
-            user_id=current_user.id,
-            imdb_id=imdb_id,
-            is_rewatch=is_rewatch
-        )
-        db.session.add(entry)
-
-        if not WatchedFilm.query.filter_by(user_id=current_user.id, tmdb_id=str(imdb_id)).first():
-            db.session.add(WatchedFilm(
-                user_id=current_user.id,
-                tmdb_id=str(imdb_id),
-                title=title,
-                poster_url=poster,
-            ))
-
-        if review and rating:
-            post = Post(
-                movie=title,
-                content=review,
-                rating=rating,
-                poster_url=poster,
+        def work():
+            # One diary entry per film: logging it again updates the entry and marks it a rewatch.
+            already = find_diary_entry(current_user.id, imdb_id, title) is not None
+            save_film_log(
+                current_user.id,
                 imdb_id=imdb_id,
-                user_id=current_user.id
+                title=title,
+                poster=movie.get('Poster'),
+                year=movie.get('Year'),
+                rating=rating,
+                review=review or None,
+                is_rewatch=is_rewatch or already,
+                watched_date=watched_date,
             )
-            db.session.add(post)
+            # Remove from watchlist if present
+            existing = Watchlist.query.filter_by(user_id=current_user.id, title=title).first()
+            if existing:
+                db.session.delete(existing)
 
-        # Remove from watchlist if present
-        existing = Watchlist.query.filter_by(user_id=current_user.id, title=title).first()
-        if existing:
-            db.session.delete(existing)
-
-        db.session.commit()
+        run_in_transaction(work)
         flash("Film logged.", "success")
         return redirect(url_for('film_page', imdb_id=imdb_id))
 
@@ -3395,41 +4324,34 @@ def rate_film(imdb_id):
         return redirect(url_for('film_page', imdb_id=imdb_id))
 
     title = movie.get('Title')
-    poster = poster_or_placeholder(movie.get('Poster'))
     review_text = request.form.get('content', '').strip()
-    content = review_text or f"Rated {title}."
+    # Letterboxd-style options; only present on the full review form, so quick star ratings leave them alone.
+    from_review_form = request.form.get('review_form') == '1'
+    is_rewatch = (request.form.get('is_rewatch') == '1') if from_review_form else None
+    has_spoilers = (request.form.get('has_spoilers') == '1') if from_review_form else None
 
-    post = Post.query.filter_by(user_id=current_user.id, movie=title).order_by(
-        Post.created_at.desc()
-    ).first()
-    if post:
-        post.rating = rating
-        post.poster_url = poster
-        post.imdb_id = imdb_id
-        if review_text:
-            post.content = review_text
-    else:
-        post = Post(
-            movie=title,
-            content=content,
-            rating=rating,
-            poster_url=poster,
-            imdb_id=imdb_id,
-            user_id=current_user.id
-        )
-        db.session.add(post)
+    if len(review_text) > REVIEW_MAX_LENGTH:
+        flash(f"Reviews are limited to {REVIEW_MAX_LENGTH} characters.", "warning")
+        return redirect(url_for('film_page', imdb_id=imdb_id))
+    watched_date, date_error = parse_watched_date(request.form.get('watched_date'))
+    if date_error:
+        flash(date_error, "warning")
+        return redirect(url_for('film_page', imdb_id=imdb_id))
 
-    upsert_diary_for_rating(
-        user_id=current_user.id,
-        title=title,
-        poster=poster,
+    # Rating, review, diary entry and watched mark are saved together in one transaction.
+    run_in_transaction(lambda: save_film_log(
+        current_user.id,
         imdb_id=imdb_id,
+        title=title,
+        poster=movie.get('Poster'),
+        year=movie.get('Year'),
         rating=rating,
-        review=review_text,
-    )
-
-    db.session.commit()
-    flash("Saved to your diary." if review_text else "Rating saved to your diary.", "success")
+        review=review_text if from_review_form else (review_text or None),
+        is_rewatch=is_rewatch,
+        has_spoilers=has_spoilers,
+        watched_date=watched_date,
+    ))
+    flash("Review saved to your diary." if review_text else "Rating saved to your diary.", "success")
     return redirect(url_for('film_page', imdb_id=imdb_id))
 
 
@@ -3447,24 +4369,18 @@ def add_post():
             flash('All fields are required.', 'danger')
             return redirect(url_for('add_post'))
 
-        post = Post(
-            movie=movie,
-            content=content,
-            rating=rating,
-            poster_url=poster_url,
+        if len(content) > REVIEW_MAX_LENGTH:
+            flash(f'Reviews are limited to {REVIEW_MAX_LENGTH} characters.', 'danger')
+            return redirect(url_for('add_post'))
+
+        run_in_transaction(lambda: save_film_log(
+            current_user.id,
             imdb_id=imdb_id,
-            user_id=current_user.id
-        )
-        db.session.add(post)
-        upsert_diary_for_rating(
-            user_id=current_user.id,
             title=movie,
-            poster=poster_or_placeholder(poster_url),
-            imdb_id=imdb_id,
+            poster=poster_url,
             rating=rating,
             review=content,
-        )
-        db.session.commit()
+        ))
         flash('Review added to your diary!', 'success')
         if imdb_id:
             return redirect(url_for('film_page', imdb_id=imdb_id))
@@ -3483,27 +4399,26 @@ def add_diary():
         poster_url = request.form.get('poster_url', '')
         imdb_id = request.form.get('imdb_id', '').strip() or None
         is_rewatch = bool(request.form.get('is_rewatch'))
-        watched_date = datetime.strptime(request.form['watched_date'], '%Y-%m-%d').date()
+        watched_date, date_error = parse_watched_date(request.form.get('watched_date'), date.today())
+        if date_error or len(review) > REVIEW_MAX_LENGTH or not title:
+            flash(date_error or f"Reviews are limited to {REVIEW_MAX_LENGTH} characters.", "danger")
+            return redirect(url_for('add_diary'))
 
-        upsert_diary_for_rating(
-            user_id=current_user.id,
-            title=title,
-            poster=poster_or_placeholder(poster_url),
-            imdb_id=imdb_id,
-            rating=rating,
-            review=review or None,
-            watched_date=watched_date,
-        )
-        if is_rewatch:
-            entry = DiaryEntry.query.filter_by(
-                user_id=current_user.id,
+        def work():
+            already = find_diary_entry(current_user.id, imdb_id, title) is not None
+            save_film_log(
+                current_user.id,
+                imdb_id=imdb_id,
                 title=title,
+                poster=poster_url,
+                rating=rating,
+                review=review or None,
+                is_rewatch=is_rewatch or already,
                 watched_date=watched_date,
-            ).first()
-            if entry:
-                entry.is_rewatch = True
-        db.session.commit()
-        flash("Diary entry added!", "success")
+            )
+
+        run_in_transaction(work)
+        flash("Diary entry saved!", "success")
         return redirect(url_for('diary'))
 
     return render_view('add_diary', today=date.today().isoformat())
@@ -3746,24 +4661,24 @@ def edit_post(post_id):
         return redirect(url_for('home'))
 
     if request.method == 'POST':
-        post.movie = request.form['movie'].strip()
-        post.content = request.form['content'].strip()
-        post.rating = parse_rating(request.form.get('rating'), post.rating)
-        post.poster_url = request.form.get('poster_url', '').strip()
-        post.imdb_id = request.form.get('imdb_id', '').strip() or post.imdb_id
-        review_text = post.content or ''
-        if review_text.startswith('Rated '):
-            review_text = ''
-        upsert_diary_for_rating(
-            user_id=current_user.id,
-            title=post.movie,
-            poster=poster_or_placeholder(post.poster_url),
-            imdb_id=post.imdb_id,
-            rating=post.rating,
-            review=review_text or None,
-            watched_date=post.created_at.date() if post.created_at else date.today(),
-        )
-        db.session.commit()
+        new_title = request.form['movie'].strip()
+        new_content = request.form['content'].strip()
+        if len(new_content) > REVIEW_MAX_LENGTH:
+            flash(f'Reviews are limited to {REVIEW_MAX_LENGTH} characters.', 'danger')
+            return render_view('edit_post', post=post)
+
+        def work():
+            save_film_log(
+                current_user.id,
+                imdb_id=request.form.get('imdb_id', '').strip() or post.imdb_id,
+                title=new_title,
+                poster=request.form.get('poster_url', '').strip() or post.poster_url,
+                rating=parse_rating(request.form.get('rating'), post.rating),
+                review=new_content,
+                post=post,
+            )
+
+        run_in_transaction(work)
         flash('Review updated.', 'success')
         return redirect(url_for('user_profile', username=current_user.username))
 
@@ -3778,11 +4693,21 @@ def delete_post(post_id):
         flash("You can't delete someone else's post!", 'danger')
         return redirect(url_for('home'))
 
+    film_id, title = post.imdb_id, post.movie
     Comment.query.filter_by(post_id=post.id).delete()
-    db.session.delete(post)
+    if real_review_text(post):
+        # Deleting the written review keeps the star rating (and so the rating-only diary entry).
+        post.content = f'{REVIEW_PLACEHOLDER}{post.movie}.'
+        post.has_spoilers = False
+        flash('Review deleted. Your rating is kept.', 'success')
+    else:
+        PostLike.query.filter_by(post_id=post.id).delete()
+        db.session.delete(post)
+        flash('Rating removed.', 'success')
+    db.session.flush()
+    resync_diary_after_post_change(current_user.id, film_id, title)
     db.session.commit()
-    flash('Review deleted successfully.', 'success')
-    return redirect(url_for('home'))
+    return redirect(request.referrer or url_for('home'))
 
 
 @app.route('/dashboard')
@@ -3822,9 +4747,9 @@ def delete_diary(entry_id):
         flash("Not authorized to delete this entry.", "danger")
         return redirect(url_for('diary'))
 
-    db.session.delete(entry)
+    remove_film_log(current_user.id, entry)
     db.session.commit()
-    flash("Diary entry deleted.", "info")
+    flash("Removed from your diary, along with your rating and review.", "info")
     return redirect(url_for('diary'))
 
 
@@ -3838,14 +4763,31 @@ def edit_diary(entry_id):
         return redirect(url_for('diary'))
 
     if request.method == 'POST':
-        entry.title = request.form['title'].strip()
-        entry.poster_url = request.form['poster_url'].strip()
-        entry.rating = parse_rating(request.form.get('rating'), entry.rating)
-        entry.review = request.form['review'].strip()
-        entry.watched_date = datetime.strptime(request.form['watched_date'], '%Y-%m-%d').date()
-        entry.is_rewatch = bool(request.form.get('is_rewatch'))
-        entry.imdb_id = request.form.get('imdb_id', '').strip() or entry.imdb_id
-        db.session.commit()
+        new_title = request.form['title'].strip()
+        new_review = request.form['review'].strip()
+        watched_date, date_error = parse_watched_date(request.form.get('watched_date'), entry.watched_date)
+        if date_error or not new_title or len(new_review) > REVIEW_MAX_LENGTH:
+            flash(date_error or f"Reviews are limited to {REVIEW_MAX_LENGTH} characters.", "danger")
+            return render_view('edit_diary', entry=entry)
+
+        def work():
+            save_film_log(
+                current_user.id,
+                imdb_id=request.form.get('imdb_id', '').strip() or entry.imdb_id,
+                title=new_title,
+                poster=request.form['poster_url'].strip() or entry.poster_url,
+                rating=parse_rating(request.form.get('rating'), entry.rating),
+                review=new_review,
+                is_rewatch=bool(request.form.get('is_rewatch')),
+                watched_date=watched_date,
+                entry=entry,
+            )
+
+        try:
+            run_in_transaction(work)
+        except IntegrityError:
+            flash("You already have that film in your diary.", "danger")
+            return render_view('edit_diary', entry=db.session.get(DiaryEntry, entry_id))
         flash("Diary entry updated!", "success")
         return redirect(url_for('diary'))
 
@@ -3962,6 +4904,12 @@ def followers_feed():
 
     activity.sort(key=lambda item: item['when'] or datetime.min, reverse=True)
     return render_view('feed', activity=activity[:50])
+
+
+@app.route('/reviews')
+def reviews():
+    posts = Post.query.order_by(Post.created_at.desc()).limit(50).all()
+    return render_view('reviews', posts=posts)
 
 
 @app.route('/lists')
@@ -4369,7 +5317,10 @@ def add_to_watchlist():
             return redirect(url_for('film_page', imdb_id=imdb_id))
         return redirect(url_for('watchlist'))
 
-    movie = Watchlist(title=title, poster_url=poster_url, user_id=current_user.id)
+    movie = Watchlist(
+        title=title, poster_url=poster_url, user_id=current_user.id,
+        media_type='movie', tmdb_id=str(imdb_id) if imdb_id else None,
+    )
     db.session.add(movie)
     db.session.commit()
     flash("Movie added to your watchlist!", "success")
@@ -4443,6 +5394,62 @@ def search_preview():
     return jsonify(results)
 
 
+@app.route('/api/search')
+def api_search():
+    """Navbar suggestions: films, series and people from TMDB multi-search (cached by tmdb_get).
+
+    Without a query it returns this week's trending titles, so focusing the box already shows ideas.
+    """
+    query = (request.args.get('q') or '').strip()[:80]
+    if not TMDB_API_KEY:
+        return jsonify({'query': query, 'results': [], 'trending': not query})
+
+    if query:
+        data = tmdb_get('/search/multi', query=query, include_adult='false', language='en-US')
+    else:
+        data = tmdb_get('/trending/all/day', language='en-US')
+
+    results = []
+    for item in (data or {}).get('results') or []:
+        kind = item.get('media_type')
+        if kind not in ('movie', 'tv', 'person') or not item.get('id'):
+            continue
+        item_id = str(item['id'])
+        if kind == 'movie':
+            title = item.get('title') or item.get('original_title')
+            date_text = item.get('release_date') or ''
+            image = item.get('poster_path')
+            subtitle = ' · '.join(p for p in ('Film', date_text[:4]) if p)
+            url = url_for('film_page', imdb_id=item_id)
+        elif kind == 'tv':
+            title = item.get('name') or item.get('original_name')
+            date_text = item.get('first_air_date') or ''
+            image = item.get('poster_path')
+            subtitle = ' · '.join(p for p in ('Series', date_text[:4]) if p)
+            url = url_for('series_page', tmdb_id=item_id)
+        else:
+            if query == '' or not item.get('profile_path') and (item.get('popularity') or 0) < 5:
+                continue
+            title = item.get('name')
+            image = item.get('profile_path')
+            subtitle = item.get('known_for_department') or 'Person'
+            url = url_for('person_page', person_id=item_id)
+        if not title:
+            continue
+        results.append({
+            'type': kind,
+            'id': item_id,
+            'title': title,
+            'subtitle': subtitle,
+            'image': tmdb_poster_url(image, size='w92') if image else None,
+            'url': url,
+        })
+        if len(results) >= 8:
+            break
+
+    return jsonify({'query': query, 'results': results, 'trending': not query})
+
+
 @app.route('/add_review/<movie_title>', methods=['GET', 'POST'])
 @login_required
 def add_review(movie_title):
@@ -4470,30 +5477,92 @@ def add_review(movie_title):
             flash("Write a few words about the film.", "warning")
             return render_view('add_review', movie=movie_data)
 
-        post = Post(
-            movie=title,
-            rating=rating,
-            content=content,
-            poster_url=poster_url,
+        if len(content) > REVIEW_MAX_LENGTH:
+            flash(f"Reviews are limited to {REVIEW_MAX_LENGTH} characters.", "warning")
+            return render_view('add_review', movie=movie_data)
+
+        run_in_transaction(lambda: save_film_log(
+            current_user.id,
             imdb_id=imdb_id,
-            user_id=current_user.id
-        )
-        db.session.add(post)
-        upsert_diary_for_rating(
-            user_id=current_user.id,
             title=title,
             poster=poster_url,
-            imdb_id=imdb_id,
+            year=movie_data.get('Year'),
             rating=rating,
             review=content,
-        )
-        db.session.commit()
+        ))
         flash("Review added to your diary!", "success")
         if imdb_id:
             return redirect(url_for('film_page', imdb_id=imdb_id))
         return redirect(url_for('dashboard'))
 
     return render_view('add_review', movie=movie_data)
+
+
+@login_manager.unauthorized_handler
+def handle_unauthorized():
+    """JSON 401 for /api/*, the usual redirect-to-login (with ?next=) for pages."""
+    if request.path.startswith('/api/'):
+        return jsonify(ok=False, message='Sign in required.'), 401
+    flash(login_manager.login_message, login_manager.login_message_category)
+    return redirect(url_for('login', next=request.full_path.rstrip('?')))
+
+
+def api_error(message, status):
+    return jsonify(ok=False, message=message), status
+
+
+def api_guard():
+    """None when OK, else an error response. Mutating calls must come from our own JS (CSRF guard)."""
+    if not current_user.is_authenticated:
+        return api_error('Sign in required.', 401)
+    if request.method in ('PATCH', 'PUT', 'DELETE', 'POST') and request.headers.get('X-Requested-With') != 'fetch':
+        return api_error('Missing X-Requested-With header.', 400)
+    return None
+
+
+def own_diary_entry_or_none(entry_id):
+    """The entry only if it belongs to the signed-in user (404 for anyone else's, so ids don't leak)."""
+    return DiaryEntry.query.filter_by(id=entry_id, user_id=current_user.id).first()
+
+
+@app.route('/api/diary/<int:entry_id>', methods=['PATCH'])
+def api_diary_update(entry_id):
+    blocked = api_guard()
+    if blocked:
+        return blocked
+    entry = own_diary_entry_or_none(entry_id)
+    if entry is None:
+        return api_error('Diary entry not found.', 404)
+    payload = request.get_json(silent=True) or {}
+    if 'watched_date' not in payload:
+        return api_error('watched_date is required.', 400)
+    watched_date, date_error = parse_watched_date(str(payload.get('watched_date') or ''))
+    if date_error or watched_date is None:
+        return api_error(date_error or 'watched_date is required.', 400)
+    entry.watched_date = watched_date
+    db.session.commit()
+    return jsonify(ok=True, entry=diary_entry_json(entry))
+
+
+@app.route('/api/diary/<int:entry_id>', methods=['DELETE'])
+def api_diary_delete(entry_id):
+    blocked = api_guard()
+    if blocked:
+        return blocked
+    entry = own_diary_entry_or_none(entry_id)
+    if entry is None:
+        return api_error('Diary entry not found.', 404)
+    film_id = entry.imdb_id
+    remove_film_log(current_user.id, entry)
+    db.session.commit()
+    return jsonify(ok=True, film_id=film_id)
+
+
+@app.cli.command("backfill-diary")
+@with_appcontext
+def backfill_diary_command():
+    """Create diary entries for any rating/review that lacks one (safe to run repeatedly)."""
+    click.echo(f"Created {backfill_diary_from_posts()} diary entries.")
 
 
 @app.cli.command("init-db")
@@ -4507,5 +5576,28 @@ with app.app_context():
     ensure_schema()
 
 
+def _prewarm_tmdb_cache():
+    """Load the data the landing pages need so the first visit isn't cold."""
+    if not TMDB_API_KEY:
+        return
+    jobs = (
+        lambda: get_popular_movies(limit=10),
+        lambda: fetch_weekly_trending_movies(limit=18),
+        lambda: fetch_weekly_trending_series(limit=16),
+        lambda: get_popular_series(limit=12),
+        lambda: fetch_series_catalog(),
+        lambda: tmdb_get('/trending/all/day', language='en-US'),
+    )
+    with app.app_context():
+        for job in jobs:
+            try:
+                job()
+            except Exception:
+                pass
+
+
 if __name__ == '__main__':
+    # With the debug reloader only the serving child should warm the cache.
+    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        threading.Thread(target=_prewarm_tmdb_cache, daemon=True).start()
     app.run(debug=True)

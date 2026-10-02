@@ -64,9 +64,16 @@
     }
 
     row.addEventListener("click", (e) => {
+      let stars;
       const target = e.target.closest("[data-stars]");
-      if (!target) return;
-      const stars = parseFloat(target.dataset.stars);
+      if (target) {
+        stars = parseFloat(target.dataset.stars);
+      } else {
+        // Keyboard activation (Enter/Space) lands on the button itself: rate that full star.
+        const button = e.target.closest(".star-rating__star");
+        if (!button) return;
+        stars = Array.prototype.indexOf.call(row.children, button) + 1;
+      }
       value = starsToRating(stars);
       paint();
       root.dispatchEvent(new CustomEvent("rating-change", { detail: { rating: value } }));

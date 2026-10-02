@@ -60,9 +60,22 @@
 
     composeForm.querySelectorAll('[data-compose-tool="media"]').forEach((btn) => {
       btn.addEventListener('click', () => {
+        if (mediaInput && btn.dataset.accept) mediaInput.accept = btn.dataset.accept;
         mediaInput?.click();
       });
     });
+
+    const counter = document.getElementById('communityComposeCount');
+    if (textarea) {
+      const max = textarea.maxLength > 0 ? textarea.maxLength : 500;
+      const sync = () => {
+        if (counter) counter.textContent = textarea.value.length + '/' + max;
+        textarea.style.height = 'auto';
+        textarea.style.height = Math.min(textarea.scrollHeight, 160) + 'px';
+      };
+      textarea.addEventListener('input', sync);
+      sync();
+    }
 
     if (mediaInput && preview) {
       mediaInput.addEventListener('change', () => {

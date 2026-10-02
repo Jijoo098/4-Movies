@@ -2,6 +2,12 @@
 <svg class="films-clapper-icon{{ ' ' ~ extra_class if extra_class else '' }}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 9.5 18.5 5.5 20.5 8.5 6.5 12.5z"/><path d="M6.2 10.7 7.4 9.5M8.4 9.1 9.6 7.9M10.7 8.5 11.9 7.3M13.2 7.7 14.4 6.5M15.7 6.1 16.9 4.9"/><path d="M4 12.5h16"/><path d="M5.2 12.5 6.4 14.2M7.5 12.5 8.7 14.2M9.8 12.5 11 14.2M12.1 12.5 13.3 14.2M14.4 12.5 15.6 14.2M16.7 12.5 17.9 14.2"/><path d="M4 12.5v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M6.5 15.5h11"/><path d="M6.5 17.5h11"/><rect x="6.5" y="18.8" width="2.8" height="1.6" rx=".2"/><rect x="14.7" y="18.8" width="2.8" height="1.6" rx=".2"/></svg>
 {% endmacro %}
 
+{% macro brand_mark(extra_class='') %}
+<svg class="brand-mark{{ ' ' ~ extra_class if extra_class else '' }}" viewBox="0 0 64 44" role="img" aria-label="4 Movies" focusable="false"><g stroke-linejoin="round" stroke-width="8"><path class="brand-mark__b" d="M57 8 28 22 57 36Z"/><path class="brand-mark__a" d="M7 8 36 22 7 36Z"/></g></svg>
+{% endmacro %}
+
+{% macro brand_word(extra_class='') %}<span class="brand__title{{ ' ' ~ extra_class if extra_class else '' }}"><span class="brand__four">4</span> Movies</span>{% endmacro %}
+
 {% macro watch_online_section(options) %}
 {% if options %}
 <section class="watch-online" aria-label="Watch online">
@@ -27,6 +33,77 @@
     {% endfor %}
   </div>
 </section>
+{% endif %}
+{% endmacro %}
+
+{% macro fd_person_card(person, subtitle) %}
+<a class="fd-person" href="{{ url_for('person_page', person_id=person.id) }}">
+  <span class="fd-person__avatar">
+    <span class="fd-person__initials" aria-hidden="true">{{ person.initials or '?' }}</span>
+    {% if person.photo %}<img src="{{ person.photo }}" alt="" loading="lazy" width="185" height="278" data-fd-avatar>{% endif %}
+  </span>
+  <strong class="fd-person__name" title="{{ person.name }}">{{ person.name }}</strong>
+  {% if subtitle %}<span class="fd-person__role" title="{{ subtitle }}">{{ subtitle }}</span>{% endif %}
+</a>
+{% endmacro %}
+
+{% macro fd_review_card(post) %}
+{% set fd_name = post.author.username if post.author else 'Member' %}
+<div class="fd-review__avatar" aria-hidden="true">{{ fd_name[:1]|upper }}</div>
+<div class="fd-review__main">
+  <div class="fd-review__head">
+    {% if post.author %}
+    <a class="fd-review__name" href="{{ url_for('user_profile', username=post.author.username) }}">{{ fd_name }}</a>
+    {% else %}
+    <span class="fd-review__name">{{ fd_name }}</span>
+    {% endif %}
+    {% if current_user.is_authenticated and post.user_id == current_user.id %}<span class="fd-review__badge">You</span>{% endif %}
+    {% if post.created_at %}<time class="fd-review__date" datetime="{{ post.created_at.strftime('%Y-%m-%d') }}">{{ post.created_at.strftime('%b %d, %Y') }}</time>{% endif %}
+  </div>
+  <div class="fd-review__rating-row">
+    <div class="stars-display fd-review__stars" data-rating="{{ post.rating }}"></div>
+    {% if post.is_rewatch %}<span class="fd-review__tag" title="Watched before">Rewatched</span>{% endif %}
+  </div>
+  {% if post.content and not post.content.startswith('Rated ') %}
+    {% if post.has_spoilers %}
+    <details class="fd-review__spoiler">
+      <summary><span class="fd-review__tag fd-review__tag--warn">Contains spoilers</span> <span class="fd-review__reveal">Show review</span></summary>
+      <p class="fd-review__body">{{ post.content }}</p>
+    </details>
+    {% else %}
+    <p class="fd-review__body">{{ post.content }}</p>
+    {% endif %}
+  {% endif %}
+</div>
+{% endmacro %}
+
+{# Recommend / Watchlist toggle for films and series.
+   kind: 'recommend' | 'watchlist'; media: 'movie' | 'tv'; state: engage_copy(...) dict.
+   variant 'stat' = card in the film stats row, 'chip' = pill on the series page. Behaviour: static/engage.js #}
+{% macro engage_button(kind, media, tmdb_id, state, variant='stat') %}
+{% set p = 'fd-stat' if variant == 'stat' else 'engage-chip' %}
+{% set action = url_for(('series_' if media == 'tv' else 'film_') ~ kind, tmdb_id=tmdb_id) %}
+{% set back = url_for('series_page', tmdb_id=tmdb_id) if media == 'tv' else url_for('film_page', imdb_id=tmdb_id) %}
+{% set inner %}
+  <span class="{{ p }}__icon {{ p }}__icon--{{ 'recommend' if kind == 'recommend' else 'heart' }}" aria-hidden="true">
+    {% if kind == 'recommend' %}
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 10.5h4.2V21H2V10.5zm6.2 0 3.3-7c1.6 0 2.7 1.2 2.4 2.8l-.5 2.7H19a2.2 2.2 0 0 1 2.2 2.6l-1.2 6.4a2.5 2.5 0 0 1-2.4 2H8.2V10.5z"/></svg>
+    {% else %}
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 5 6.4 5c2 0 3.7 1.1 4.6 2.7h2C13.9 6.1 15.6 5 17.6 5 21 5 23.1 8.4 21.6 11.8 19.5 16.4 12 21 12 21z"/></svg>
+    {% endif %}
+  </span>
+  <span class="{{ p }}__body">
+    <span class="{{ p }}__value" data-engage-value>{{ state.value }}</span>
+    <span class="{{ p }}__label" data-engage-label>{{ state.label }}</span>
+    <span class="{{ p }}__sub" data-engage-sub>{{ state.sub }}</span>
+  </span>
+{% endset %}
+{% if current_user.is_authenticated %}
+<form class="engage-form" method="POST" action="{{ action }}" data-engage-form="{{ kind }}">
+  <button type="submit" class="{{ p }} engage{% if state.active %} is-on{% endif %}" aria-pressed="{{ 'true' if state.active else 'false' }}" title="{{ 'Click to undo' if state.active else ('Recommend this ' ~ ('series' if media == 'tv' else 'film') if kind == 'recommend' else 'Add to your watchlist') }}">{{ inner }}</button>
+</form>
+{% else %}
+<a class="{{ p }} engage" href="{{ url_for('login', next=back) }}" title="Sign in to {{ 'recommend this' if kind == 'recommend' else 'use your watchlist' }}">{{ inner }}</a>
 {% endif %}
 {% endmacro %}
 
@@ -96,8 +173,44 @@
   {% elif view == "profile" %}{{ user.username }} — 4 Movies
   {% elif view == "edit_profile" %}Edit Profile — 4 Movies
   {% elif view == "feed" %}Feed — 4 Movies
+  {% elif view == "reviews" %}Reviews — 4 Movies
   {% elif view == "community" %}Community — 4 Movies
-  {% elif view == "diary" %}Diary — 4 Movies
+  {% elif view == "reviews" %}
+<div class="page-head">
+  <div>
+    <h1>Reviews</h1>
+    <p class="lede">The latest reviews from across 4 Movies.</p>
+  </div>
+</div>
+
+{% if posts %}
+  {% for post in posts %}
+  <article class="activity-row">
+    <a class="poster-tile" href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">
+      <img src="{{ post.poster_url or 'https://via.placeholder.com/100x150?text=?' }}" alt="" loading="lazy">
+    </a>
+    <div>
+      <p class="verb">
+        <a href="{{ url_for('user_profile', username=post.author.username) }}">{{ post.author.username }}</a> reviewed
+      </p>
+      <h3 class="film-title">
+        <a href="{% if post.imdb_id %}{{ url_for('film_page', imdb_id=post.imdb_id) }}{% else %}{{ url_for('film_by_title', title=post.movie) }}{% endif %}">{{ post.movie }}</a>
+      </h3>
+      {% if post.rating %}
+        <div class="stars-display" data-rating="{{ post.rating }}" style="--fill: {{ (post.rating / 10 * 100)|round }}%"></div>
+      {% endif %}
+      {% if post.content %}
+        <p class="body-text mt-2">{{ post.content|truncate(280) }}</p>
+      {% endif %}
+      <p class="byline">{{ post.created_at.strftime('%b %d, %Y') if post.created_at else '' }}</p>
+    </div>
+  </article>
+  {% endfor %}
+{% else %}
+  <div class="empty-state">No reviews yet. Be the first to review a film.</div>
+{% endif %}
+
+{% elif view == "diary" %}Diary — 4 Movies
   {% elif view == "lists" %}Stack — 4 Movies
   {% elif view == "view_list" %}{{ movie_list.name }} — 4 Movies
   {% elif view == "create_list" %}New Stack — 4 Movies
@@ -115,9 +228,13 @@
   {% else %}4 Movies{% endif %}
   </title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icons/4movies-mark.svg') }}">
+  <meta name="theme-color" content="#0c121a">
+  <link rel="preconnect" href="https://image.tmdb.org" crossorigin>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600;700&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   {% if view == 'community' %}
@@ -126,177 +243,103 @@
 </head>
 <body class="{% if view == 'login' or view == 'signup' %}is-auth{% endif %}">
 
-  <header class="site-header">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  {# Active link is derived from the request path, so /film/<id> lights up Films and /series/<id> lights up Series. #}
+  {% set _p = request.path %}
+  {% set nav_active = 'series' if _p.startswith('/series') else
+                      'diary' if _p.startswith('/diary') else
+                      'community' if _p.startswith('/community') else
+                      'watchlist' if _p.startswith('/watchlist') else
+                      'films' if (_p == '/' or _p.startswith('/film') or _p == '/popular') else '' %}
+
+  <header class="site-header" id="siteHeader">
     <div class="site-header__inner">
       <a class="brand" href="{{ url_for('home') }}" aria-label="4 Movies home">
-        <img
-          class="brand__logo"
-          src="{{ url_for('static', filename='icons/4movies-logo.png') }}"
-          alt="4 Movies"
-          width="240"
-          height="96"
-        >
-        <span class="brand__title">4 Movies</span>
+        {{ brand_mark('brand__logo') }}
+        {{ brand_word() }}
       </a>
 
-      {% if current_user.is_authenticated %}
-      <button class="nav-toggle" type="button" id="navToggle" aria-label="Toggle navigation">Menu</button>
+      <span class="nav-divider nav-divider--brand" aria-hidden="true"></span>
+
       <nav class="site-nav" id="siteNav" aria-label="Main">
-        <a class="nav-item {% if view in ['home', 'popular'] %}is-active{% endif %}" href="{{ url_for('home') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            {{ films_clapper_icon() }}
-          </span>
-          <span class="nav-item__label">Films</span>
-        </a>
-        <a class="nav-item {% if view in ['series', 'series_detail', 'popular_series'] %}is-active{% endif %}" href="{{ url_for('series_index') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="1.5"/><path d="M10 9.5l4 2.5-4 2.5z"/></svg>
-          </span>
-          <span class="nav-item__label">Series</span>
-        </a>
-        <a class="nav-item {% if view == 'schedule' %}is-active{% endif %}" href="{{ url_for('schedule') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="1.5"/><path d="M8 3v4M16 3v4M4 10h16"/><circle cx="17" cy="17" r="3.5"/><path d="M17 15.2v1.8l1.1.9"/></svg>
-          </span>
-          <span class="nav-item__label">Schedule</span>
-        </a>
-        <a class="nav-item {% if view in ['lists', 'view_list', 'create_list', 'edit_list'] %}is-active{% endif %}" href="{{ url_for('lists') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l7-4 7 4-7 4z"/><path d="M5 12l7 4 7-4"/><path d="M5 16l7 4 7-4"/></svg>
-          </span>
-          <span class="nav-item__label">Stack</span>
-        </a>
-        <a class="nav-item {% if view == 'community' %}is-active{% endif %}" href="{{ url_for('community') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="2.5"/><circle cx="16.5" cy="9" r="2"/><path d="M4.5 18c.6-2.2 2.4-3.5 4.5-3.5s3.9 1.3 4.5 3.5"/><path d="M14.5 18c.4-1.5 1.6-2.5 3-2.5 1 0 1.9.4 2.5 1.2"/></svg>
-          </span>
-          <span class="nav-item__label">Community</span>
-        </a>
-        <a class="nav-item {% if view == 'watchlist' %}is-active{% endif %}" href="{{ url_for('watchlist') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4h10v16l-5-3.5L7 20z"/></svg>
-          </span>
-          <span class="nav-item__label">Watchlist</span>
-        </a>
-        <a class="nav-item nav-item--search {% if view == 'search' %}is-active{% endif %}" href="{{ url_for('search_movie') }}" aria-label="Search" title="Search">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.5-4.5"/></svg>
-          </span>
-        </a>
+        <a class="site-nav__link{% if nav_active == 'films' %} is-active{% endif %}" href="{{ url_for('home') }}"{% if nav_active == 'films' %} aria-current="page"{% endif %}><span>Films</span></a>
+        <a class="site-nav__link{% if nav_active == 'series' %} is-active{% endif %}" href="{{ url_for('series_index') }}"{% if nav_active == 'series' %} aria-current="page"{% endif %}><span>Series</span></a>
+        <a class="site-nav__link{% if nav_active == 'diary' %} is-active{% endif %}" href="{{ url_for('diary') }}"{% if nav_active == 'diary' %} aria-current="page"{% endif %}><span>Diary</span></a>
+        <a class="site-nav__link{% if nav_active == 'community' %} is-active{% endif %}" href="{{ url_for('community') }}"{% if nav_active == 'community' %} aria-current="page"{% endif %}><span>Community</span></a>
+        <a class="site-nav__link{% if nav_active == 'watchlist' %} is-active{% endif %}" href="{{ url_for('watchlist') }}"{% if nav_active == 'watchlist' %} aria-current="page"{% endif %}><span>Watchlist</span></a>
       </nav>
 
-      <div class="header-end profile-menu dropdown">
+      <form class="nav-search" role="search" action="{{ url_for('search_movie') }}" method="get">
+        <label class="visually-hidden" for="navSearchInput">Search for movies, shows or people</label>
+        <svg class="nav-search__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+        <input
+          class="nav-search__input"
+          id="navSearchInput"
+          type="search"
+          name="query"
+          value="{{ query if view == 'search' and query else '' }}"
+          placeholder="Search for movies, shows or people…"
+          autocomplete="off"
+          enterkeyhint="search"
+        >
+        <kbd class="nav-search__hint" aria-hidden="true">/</kbd>
+      </form>
+
+      <a class="nav-icon-btn nav-search-link" href="{{ url_for('search_movie') }}" aria-label="Search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+      </a>
+
+      <span class="nav-divider" aria-hidden="true"></span>
+
+      <button class="nav-icon-btn theme-toggle" type="button" id="themeToggle" aria-label="Switch to light theme" aria-pressed="false">
+        <svg class="theme-toggle__moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg>
+        <svg class="theme-toggle__sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6 6 6M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/></svg>
+      </button>
+
+      <span class="nav-divider" aria-hidden="true"></span>
+
+      <div class="profile-menu dropdown">
         <button
           class="profile-menu__trigger dropdown-toggle"
           type="button"
           id="profileMenuToggle"
           data-bs-toggle="dropdown"
           aria-expanded="false"
-          aria-label="Account menu"
+          aria-label="{% if current_user.is_authenticated %}Account menu for {{ current_user.username }}{% else %}Account menu{% endif %}"
         >
-          {% if current_user.profile_pic and current_user.profile_pic != 'default.jpg' %}
-          <img
-            class="profile-menu__avatar"
-            src="{{ url_for('static', filename='profile_pics/' ~ current_user.profile_pic) }}"
-            alt="{{ current_user.username }}"
-          >
+          {% if current_user.is_authenticated and current_user.profile_pic and current_user.profile_pic != 'default.jpg' %}
+          <img class="profile-menu__avatar" src="{{ url_for('static', filename='profile_pics/' ~ current_user.profile_pic) }}" alt="">
+          {% elif current_user.is_authenticated %}
+          <span class="profile-menu__avatar profile-menu__avatar--initials" aria-hidden="true">{{ current_user.username[:2]|upper }}</span>
           {% else %}
           <span class="profile-menu__avatar profile-menu__avatar--placeholder" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 19.5c.8-3 2.8-4.5 6.5-4.5s5.7 1.5 6.5 4.5"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" focusable="false"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 19.5c.8-3 2.8-4.5 6.5-4.5s5.7 1.5 6.5 4.5"/></svg>
           </span>
           {% endif %}
         </button>
         <ul class="dropdown-menu dropdown-menu-end profile-menu__panel" aria-labelledby="profileMenuToggle">
-          <li>
-            <a class="profile-menu__item" href="{{ url_for('user_profile', username=current_user.username) }}">
-              <span class="profile-menu__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="8" r="3.5"/><path d="M5.5 19.5c.8-3 2.8-4.5 6.5-4.5s5.7 1.5 6.5 4.5"/></svg>
-              </span>
-              <span class="profile-menu__label">My Profile</span>
-            </a>
-          </li>
-          <li>
-            <a class="profile-menu__item" href="{{ url_for('user_profile', username=current_user.username, tab='reviews') }}">
-              <span class="profile-menu__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="4" width="14" height="16" rx="2"/><path d="M9 12h6M9 16h4"/><path d="M9.5 8h5"/></svg>
-              </span>
-              <span class="profile-menu__label">My Reviews</span>
-            </a>
-          </li>
-          <li>
-            <a class="profile-menu__item" href="{{ url_for('settings') }}">
-              <span class="profile-menu__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.55 1.55M17.85 17.85l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.55-1.55M17.85 6.15l1.55-1.55"/></svg>
-              </span>
-              <span class="profile-menu__label">Settings</span>
-            </a>
-          </li>
-          <li class="profile-menu__logout-wrap">
-            <a class="profile-menu__item profile-menu__item--logout" href="{{ url_for('logout') }}">
-              <span class="profile-menu__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 7V6a2 2 0 0 1 2-2h6v16h-6a2 2 0 0 1-2-2v-1"/><path d="M14 12H4"/><path d="M7 9l-3 3 3 3"/></svg>
-              </span>
-              <span class="profile-menu__label">Logout</span>
-            </a>
-          </li>
+          {% if current_user.is_authenticated %}
+          <li><a class="profile-menu__item" href="{{ url_for('user_profile', username=current_user.username) }}"><span class="profile-menu__label">Profile</span></a></li>
+          <li><a class="profile-menu__item" href="{{ url_for('user_profile', username=current_user.username, tab='reviews') }}"><span class="profile-menu__label">My Reviews</span></a></li>
+          <li><a class="profile-menu__item" href="{{ url_for('watchlist') }}"><span class="profile-menu__label">Watchlist</span></a></li>
+          <li><a class="profile-menu__item" href="{{ url_for('settings') }}"><span class="profile-menu__label">Settings</span></a></li>
+          <li class="profile-menu__logout-wrap"><a class="profile-menu__item profile-menu__item--logout" href="{{ url_for('logout') }}"><span class="profile-menu__label">Log out</span></a></li>
+          {% else %}
+          <li><a class="profile-menu__item" href="{{ url_for('login') }}"><span class="profile-menu__label">Log in</span></a></li>
+          <li><a class="profile-menu__item" href="{{ url_for('signup') }}"><span class="profile-menu__label">Sign up</span></a></li>
+          {% endif %}
         </ul>
       </div>
-      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme">
-        Theme
+
+      <button class="nav-icon-btn nav-toggle" type="button" id="navToggle" aria-label="Open menu" aria-expanded="false" aria-controls="siteNav">
+        <svg class="nav-toggle__open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        <svg class="nav-toggle__close" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M6 6l12 12M18 6 6 18"/></svg>
       </button>
-      {% else %}
-      <button class="nav-toggle" type="button" id="navToggle" aria-label="Toggle navigation">Menu</button>
-      <nav class="site-nav site-nav--guest" id="siteNav" aria-label="Main">
-        <a class="nav-item {% if view in ['home', 'popular'] %}is-active{% endif %}" href="{{ url_for('home') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            {{ films_clapper_icon() }}
-          </span>
-          <span class="nav-item__label">Films</span>
-        </a>
-        <a class="nav-item {% if view in ['series', 'series_detail', 'popular_series'] %}is-active{% endif %}" href="{{ url_for('series_index') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="13" rx="1.5"/><path d="M10 9.5l4 2.5-4 2.5z"/></svg>
-          </span>
-          <span class="nav-item__label">Series</span>
-        </a>
-        <a class="nav-item {% if view == 'schedule' %}is-active{% endif %}" href="{{ url_for('schedule') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="1.5"/><path d="M8 3v4M16 3v4M4 10h16"/><circle cx="17" cy="17" r="3.5"/><path d="M17 15.2v1.8l1.1.9"/></svg>
-          </span>
-          <span class="nav-item__label">Schedule</span>
-        </a>
-        <a class="nav-item {% if view in ['lists', 'view_list'] %}is-active{% endif %}" href="{{ url_for('lists') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8l7-4 7 4-7 4z"/><path d="M5 12l7 4 7-4"/><path d="M5 16l7 4 7-4"/></svg>
-          </span>
-          <span class="nav-item__label">Stack</span>
-        </a>
-        <a class="nav-item {% if view == 'community' %}is-active{% endif %}" href="{{ url_for('community') }}">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="2.5"/><circle cx="16.5" cy="9" r="2"/><path d="M4.5 18c.6-2.2 2.4-3.5 4.5-3.5s3.9 1.3 4.5 3.5"/><path d="M14.5 18c.4-1.5 1.6-2.5 3-2.5 1 0 1.9.4 2.5 1.2"/></svg>
-          </span>
-          <span class="nav-item__label">Community</span>
-        </a>
-        <a class="nav-item nav-item--search {% if view == 'search' %}is-active{% endif %}" href="{{ url_for('search_movie') }}" aria-label="Search" title="Search">
-          <span class="nav-item__icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.5-4.5"/></svg>
-          </span>
-        </a>
-        <a class="nav-item nav-item--text {% if view == 'login' %}is-active{% endif %}" href="{{ url_for('login') }}">
-          <span class="nav-item__label">Login</span>
-        </a>
-        <a class="nav-item nav-item--text {% if view == 'signup' %}is-active{% endif %}" href="{{ url_for('signup') }}">
-          <span class="nav-item__label">Sign Up</span>
-        </a>
-      </nav>
-      <button class="theme-toggle" type="button" id="themeToggle" aria-label="Toggle theme">
-        Theme
-      </button>
-      {% endif %}
     </div>
   </header>
 
-  <main class="{% if view == 'login' or view == 'signup' %}{% elif view == 'home' or (view == 'series' and not query) %}landing-main{% elif view == 'community' %}community-shell{% elif view == 'schedule' %}schedule-shell{% elif view in ['film', 'series_detail'] %}film-shell{% else %}page-shell{% endif %}">
+  <main id="main" tabindex="-1" class="{% if view == 'login' or view == 'signup' %}{% elif view == 'home' or (view == 'series' and not query) %}landing-main{% elif view == 'community' %}community-shell{% elif view == 'schedule' %}schedule-shell{% elif view in ['film', 'series_detail'] %}film-shell{% else %}page-shell{% endif %}">
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="flash-stack{% if view == 'home' %} page-shell{% endif %}">
@@ -311,17 +354,13 @@
 <div class="auth-page">
   <div class="auth-stage">
     <div class="auth-stage__brand">
-      <img
-        class="brand-hero__logo"
-        src="{{ url_for('static', filename='icons/4movies-logo.png') }}"
-        alt="4 Movies"
-      >
-      <p class="brand__title brand__title--hero">4 Movies</p>
+      {{ brand_mark('brand-hero__logo') }}
+      {{ brand_word('brand__title--hero') }}
     </div>
     <p class="tagline">Your private cinema lobby for reviews and rewatches.</p>
 
     <div class="form-panel">
-      <form method="POST" action="{{ url_for('login') }}" autocomplete="on">
+      <form method="POST" action="{{ url_for('login', next=request.args.get('next')) }}" autocomplete="on">
         <div class="mb-3">
           <label for="email" class="form-label">Email</label>
           <input type="email" name="email" id="email" class="form-control" required placeholder="you@example.com" autocomplete="email">
@@ -343,12 +382,8 @@
 <div class="auth-page">
   <div class="auth-stage">
     <div class="auth-stage__brand">
-      <img
-        class="brand-hero__logo"
-        src="{{ url_for('static', filename='icons/4movies-logo.png') }}"
-        alt="4 Movies"
-      >
-      <p class="brand__title brand__title--hero">4 Movies</p>
+      {{ brand_mark('brand-hero__logo') }}
+      {{ brand_word('brand__title--hero') }}
     </div>
     <p class="tagline">Claim your seat. Rate, remember, and revisit.</p>
 
@@ -489,306 +524,580 @@
 </div>
 
 {% elif view == "film" %}
-<div class="film-page{% if movie.Backdrop or movie.Trailer %} has-cover{% endif %}">
-  {% if movie.Backdrop %}
-  <div class="film-cover">
-    <img class="film-cover__img" src="{{ movie.Backdrop }}" alt="">
-    <div class="film-cover__fade"></div>
-    {% if movie.Trailer %}
-    <button
-      type="button"
-      class="film-cover__play"
-      data-trailer-url="{{ movie.Trailer }}"
-      aria-label="Play {{ movie.Title }} trailer"
-    >
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
-    </button>
-    {% endif %}
-  </div>
-  {% elif movie.Trailer %}
-  <div class="film-cover film-cover--compact">
-    <button
-      type="button"
-      class="film-cover__play"
-      data-trailer-url="{{ movie.Trailer }}"
-      aria-label="Play {{ movie.Title }} trailer"
-    >
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
-    </button>
+{# Film detail page redesign. Styles: static/style.css ("Film detail page" section). Behaviour: static/film.js. #}
+{% set fd_poster = movie.Poster if movie.Poster and movie.Poster != 'N/A' else 'https://via.placeholder.com/300x450?text=No+Poster' %}
+{% set fd_login = url_for('login', next=request.path) %}
+{% set fd_blurb = movie.Tagline or (movie.Plot if movie.Plot and movie.Plot != 'No plot available.' else '') %}
+{# Always set: a real YouTube trailer when TMDB has one, otherwise a YouTube search for the trailer (opens in a new tab). #}
+{% set fd_trailer = movie.Trailer or '' %}
+{% set fd_has_people = movie.Cast or movie.Crew %}
+{% set fd_has_media = movie.Backdrops or movie.Posters or movie.Videos %}
+<div class="fd">
+
+  {# Ambient backdrop: small blurred image behind the dashboard so wide screens do not show empty black margins. #}
+  {% if movie.BackdropW780 %}
+  <div class="fd-ambient" aria-hidden="true">
+    <img src="{{ movie.BackdropW780 }}" alt="" width="780" height="439" decoding="async" fetchpriority="low">
   </div>
   {% endif %}
-  <div class="page-shell film-page__body">
-<section class="film-hub">
-  <div class="film-hub__poster poster-tile">
-    <img src="{{ movie.Poster if movie.Poster != 'N/A' else 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.Title }}">
-    <div class="film-hub__poster-meta">
-      <span>{{ movie.Year }}</span>
-      {% if movie.Runtime and movie.Runtime != 'N/A' %}<span>{{ movie.Runtime }}</span>{% endif %}
-      {% if movie.Genre and movie.Genre != 'N/A' %}<span>{{ movie.Genre.split(',')[0] }}</span>{% endif %}
-    </div>
-  </div>
-  <div class="film-hub__meta">
-    <p class="eyebrow">Film</p>
-    <h1>{{ movie.Title }}</h1>
-    <p class="tagline-meta">
-      {{ movie.Year }}
-      {% if movie.Runtime and movie.Runtime != 'N/A' %} · {{ movie.Runtime }}{% endif %}
-      {% if movie.Genre and movie.Genre != 'N/A' %} · {{ movie.Genre }}{% endif %}
-      {% if movie.Director and movie.Director != 'N/A' %} · Dir. {{ movie.Director }}{% endif %}
-      {% if movie.imdbRating and movie.imdbRating != 'N/A' %} · TMDB {{ movie.imdbRating }}{% endif %}
-    </p>
 
-    {% if user_rating %}
-      <div class="mb-2">
-        <span class="stars-display" data-rating="{{ user_rating }}" style="--fill: {{ (user_rating / 10 * 100)|round }}%"></span>
-        <span class="text-muted ms-2" style="font-family:var(--font-body);font-size:0.8rem;">Your rating</span>
+  {# ---------------- Hero ---------------- #}
+  <section class="fd-hero{% if not movie.Backdrop %} fd-hero--noimg{% endif %}" aria-labelledby="fdTitle">
+    <div class="fd-hero__bg" aria-hidden="true"></div>
+    {% if movie.Backdrop %}
+    <img
+      class="fd-hero__img"
+      src="{{ movie.BackdropW1280 or movie.Backdrop }}"
+      {% if movie.BackdropW780 and movie.BackdropW1280 %}srcset="{{ movie.BackdropW780 }} 780w, {{ movie.BackdropW1280 }} 1280w, {{ movie.Backdrop }} 1920w" sizes="100vw"{% endif %}
+      alt=""
+      width="1280"
+      height="720"
+      fetchpriority="high"
+      decoding="async"
+    >
+    {% endif %}
+    <div class="fd-hero__shade" aria-hidden="true"></div>
+
+    <div class="fd-container fd-hero__inner">
+      <div class="fd-hero__copy">
+        <h1 id="fdTitle" class="fd-hero__title{% if movie.Logo %} has-logo{% endif %}">
+          {% if movie.Logo %}
+          <img class="fd-hero__logo" src="{{ movie.Logo }}" alt="" data-fd-logo>
+          {% endif %}
+          <span class="fd-hero__title-text">{{ movie.Title }}</span>
+        </h1>
+
+        {% if movie.MetaParts %}
+        <ul class="fd-meta" aria-label="Film details">
+          {% for part in movie.MetaParts %}<li>{{ part }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+
+        {% if fd_blurb %}
+        <p class="fd-hero__blurb">{{ fd_blurb }}</p>
+        {% endif %}
+
+        <div class="fd-actions">
+          {% if current_user.is_authenticated %}
+          <button type="button" class="fd-btn fd-btn--primary" data-fd-action="write-review">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            Add Review
+          </button>
+          {% else %}
+          <a class="fd-btn fd-btn--primary" href="{{ fd_login }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            Add Review
+          </a>
+          {% endif %}
+
+          {% if not current_user.is_authenticated %}
+          <a class="fd-btn fd-btn--ghost" href="{{ fd_login }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            Watchlist
+          </a>
+          {% else %}
+          {# Same toggle as the Watchlist stat card below; static/engage.js keeps the two in sync. #}
+          <form class="fd-inline-form engage-form" action="{{ url_for('film_watchlist', tmdb_id=movie.imdbID) }}" method="POST" data-engage-form="watchlist">
+            <button type="submit" class="fd-btn fd-btn--ghost{% if in_watchlist %} is-on{% endif %}" aria-pressed="{{ 'true' if in_watchlist else 'false' }}">
+              <svg class="fd-btn__off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <svg class="fd-btn__on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+              <span data-on="In Watchlist" data-off="Watchlist">{{ 'In Watchlist' if in_watchlist else 'Watchlist' }}</span>
+            </button>
+          </form>
+          {% endif %}
+
+          <div class="fd-menu" data-fd-menu>
+            <button type="button" class="fd-btn fd-btn--ghost fd-btn--icon" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" data-fd-menu-toggle>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>
+            </button>
+            <div class="fd-menu__list" role="menu" aria-label="More actions" hidden>
+              <button type="button" role="menuitem" class="fd-menu__item" data-fd-copy-link>Copy link</button>
+              <button type="button" role="menuitem" class="fd-menu__item" data-fd-share hidden>Share&hellip;</button>
+              {% if current_user.is_authenticated %}
+              <form action="{{ url_for('like_film', imdb_id=movie.imdbID) }}" method="POST" role="none">
+                <button
+                  type="submit"
+                  role="menuitem"
+                  class="fd-menu__item"
+                  title="{{ 'Remove your like from this film' if liked else 'Like this film (shows on your profile)' }}"
+                >
+                  <svg class="fd-menu__heart{% if liked %} is-on{% endif %}" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.2C.9 8.4 3 5 6.4 5c2 0 3.7 1.1 4.6 2.7h2C13.9 6.1 15.6 5 17.6 5 21 5 23.1 8.4 21.6 11.8 19.5 16.4 12 21 12 21z" fill="{{ 'currentColor' if liked else 'none' }}" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+                  {{ 'Liked' if liked else 'Like' }}{% if like_count %} <span class="fd-menu__count">{{ like_count|compact }}</span>{% endif %}
+                </button>
+              </form>
+              <form action="{{ url_for('mark_watched', imdb_id=movie.imdbID) }}" method="POST" role="none">
+                <button type="submit" role="menuitem" class="fd-menu__item">{{ 'Mark as unwatched' if watched else 'Mark as watched' }}</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+        </div>
       </div>
-    {% endif %}
 
-    <p class="film-hub__plot">{{ movie.Plot }}</p>
-
-    {% if is_upcoming and cant_miss %}
-    {{ cant_miss_widget('movie', movie.tmdb_id, cant_miss) }}
-    {% endif %}
-
-    {{ watch_online_section(watch_online) }}
-
-    {% if current_user.is_authenticated %}
-    <div class="action-strip">
-      {% if not in_watchlist %}
-      <form action="{{ url_for('add_to_watchlist') }}" method="POST">
-        <input type="hidden" name="title" value="{{ movie.Title }}">
-        <input type="hidden" name="poster_url" value="{{ movie.Poster }}">
-        <input type="hidden" name="imdb_id" value="{{ movie.imdbID }}">
-        <button type="submit" class="btn btn-secondary">Watchlist</button>
-      </form>
-      {% else %}
-        <a class="btn btn-outline-secondary" href="{{ url_for('watchlist') }}">On Watchlist</a>
-      {% endif %}
     </div>
 
-    <div class="rate-review-box">
-      <form class="rate-review-like-form" action="{{ url_for('like_film', imdb_id=movie.imdbID) }}" method="POST">
-        <button
-          type="submit"
-          class="rate-review-like btn-like{% if liked %} is-liked{% endif %}"
-          aria-label="{{ 'Unlike this film' if liked else 'Like this film' }}"
-          title="{{ 'Unlike this film' if liked else 'Like this film' }}"
-        >
-          <span class="btn-like__icon" aria-hidden="true">{% if liked %}❤️{% else %}💔{% endif %}</span>
-          {% if like_count %}<span class="btn-like__count">{{ like_count }}</span>{% endif %}
-        </button>
-      </form>
+    {# Centered on the cover; lives outside .fd-hero__inner so it can be positioned against the whole banner. #}
+    {% if fd_trailer %}
+    <button type="button" class="fd-hero__play" data-fd-trailer="{{ fd_trailer }}" aria-label="Play {{ movie.Title }} trailer">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
+    </button>
+    {% endif %}
+  </section>
 
-      <form class="rate-review form-panel" action="{{ url_for('rate_film', imdb_id=movie.imdbID) }}" method="POST">
-        <div class="rate-review__stars">
-          <label class="form-label mb-0">Your rating</label>
-          <div class="star-rating" data-name="rating" data-value="{{ user_rating or 0 }}"></div>
-          {% if user_rating %}
-          <span class="rate-review__feel">
-            {% if user_rating >= 8 %}Loved it!{% elif user_rating >= 6 %}Liked it{% elif user_rating >= 4 %}Mixed feelings{% else %}Not for me{% endif %}
-          </span>
+  {# ---------------- Dashboard: poster | stats + tabs | rate + where to watch, then two card columns ---------------- #}
+  {% set fd_videos = movie.Videos or [] %}
+  {% set fd_trailers = fd_videos|selectattr('group', 'equalto', 'trailers')|list %}
+  {% set fd_clips = fd_videos|selectattr('group', 'equalto', 'clips')|list %}
+  {% set fd_media = [('trailers', 'Trailers', fd_trailers), ('clips', 'Clips', fd_clips), ('images', 'Images', movie.Backdrops or []), ('posters', 'Posters', movie.Posters or [])] %}
+  {% set fd_media_ns = namespace(first=None) %}
+  {% for key, label, items in fd_media %}{% if items and not fd_media_ns.first %}{% set fd_media_ns.first = key %}{% endif %}{% endfor %}
+  {% set fd_justwatch = watch_online[0].url if watch_online and watch_online[0].url and watch_online[0].url != '#' else 'https://www.justwatch.com/' %}
+
+  <div class="fd-dash">
+
+    {# ---- Poster card ---- #}
+    <figure class="fd-dash__poster fd-pcard">
+      {# Just the poster: it fills the whole card (cover), no blurred bars above or below. #}
+      <div class="fd-pcard__stage">
+        <img src="{{ fd_poster }}" alt="{{ movie.Title }} poster" width="300" height="450" data-fd-poster>
+      </div>
+    </figure>
+
+    {# ---- Center: stats row + tabs card ---- #}
+    <div class="fd-dash__main">
+          <div class="fd-stats" aria-label="Community stats">
+            <article class="fd-stat">
+              <span class="fd-stat__icon fd-stat__icon--star" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17.4l-6 3.3 1.3-6.6L2.4 9.5l6.7-.8L12 2.6z"/></svg>
+              </span>
+              <div class="fd-stat__body">
+                {% if stats.avg_rating %}
+                <p class="fd-stat__value">{{ stats.avg_rating }}<small>/10</small></p>
+                <p class="fd-stat__label">User Rating</p>
+                <p class="fd-stat__sub">{{ stats.rating_count|compact }} Rating{{ '' if stats.rating_count == 1 else 's' }}</p>
+                {% else %}
+                <p class="fd-stat__value fd-stat__value--empty" aria-label="No rating yet">&mdash;</p>
+                <p class="fd-stat__label">User Rating</p>
+                <p class="fd-stat__sub">No ratings yet</p>
+                {% endif %}
+              </div>
+            </article>
+
+            {# Both are real buttons: click to recommend / save, click again to undo (static/engage.js, no page reload). #}
+            {{ engage_button('recommend', 'movie', movie.imdbID, engage.recommend, 'stat') }}
+            {{ engage_button('watchlist', 'movie', movie.imdbID, engage.watchlist, 'stat') }}
+          </div>
+
+      <div class="fd-panel">
+        <div class="fd-tabs" role="tablist" aria-label="Film sections">
+          <button type="button" role="tab" class="fd-tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" tabindex="0" data-fd-tab="overview">Overview</button>
+          <button type="button" role="tab" class="fd-tab" id="tab-reviews" aria-controls="panel-reviews" aria-selected="false" tabindex="-1" data-fd-tab="reviews">Reviews{% if reviews %} <span class="fd-tab__count">{{ reviews|length|compact }}</span>{% endif %}</button>
+          {% if fd_has_people %}
+          <button type="button" role="tab" class="fd-tab" id="tab-cast" aria-controls="panel-cast" aria-selected="false" tabindex="-1" data-fd-tab="cast">Cast &amp; Crew</button>
+          {% endif %}
+          {% if fd_has_media %}
+          <button type="button" role="tab" class="fd-tab" id="tab-media" aria-controls="panel-media" aria-selected="false" tabindex="-1" data-fd-tab="media">Media</button>
+          {% endif %}
+          {# TODO(discussions): add a "Discussions" tab once the feature exists. Intentionally hidden for now. #}
+        </div>
+
+        {# ---- Overview ---- #}
+        <section class="fd-tabpanel fd-tabpanel--overview" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0" data-fd-panel="overview">
+          <div class="fd-overview__story">
+            {% if movie.Plot and movie.Plot != 'No plot available.' %}
+            <p class="fd-synopsis" id="fdSynopsis" data-fd-synopsis>{{ movie.Plot }}</p>
+            <button type="button" class="fd-link fd-readmore" data-fd-readmore aria-expanded="false" aria-controls="fdSynopsis" hidden>Read more</button>
+            {% else %}
+            <p class="fd-synopsis fd-synopsis--empty">No synopsis available yet.</p>
+            {% endif %}
+            {% if movie.GenreList or movie.Runtime and movie.Runtime != 'N/A' %}
+            <ul class="fd-chips" aria-label="Genres and runtime">
+              {% for g in movie.GenreList %}<li class="fd-chip">{{ g }}</li>{% endfor %}
+              {% if movie.Runtime and movie.Runtime != 'N/A' %}
+              <li class="fd-chip fd-chip--time">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                {{ movie.Runtime }}
+              </li>
+              {% endif %}
+            </ul>
+            {% endif %}
+          </div>
+
+          <dl class="fd-meta-grid" aria-label="About this film">
+            <div><dt>Director</dt><dd>{{ movie.Director if movie.Director and movie.Director != 'N/A' else '&mdash;'|safe }}</dd></div>
+            <div><dt>Writers</dt><dd>{{ movie.Writers or '&mdash;'|safe }}</dd></div>
+            <div><dt>Language</dt><dd>{{ movie.Language or '&mdash;'|safe }}</dd></div>
+            <div><dt>Release Date</dt><dd>{{ movie.ReleaseShort or '&mdash;'|safe }}</dd></div>
+            <div><dt>Country</dt><dd>{{ movie.Country or '&mdash;'|safe }}</dd></div>
+          </dl>
+
+          {% if is_upcoming and cant_miss %}
+          <div class="fd-overview__cantmiss">{{ cant_miss_widget('movie', movie.tmdb_id, cant_miss) }}</div>
+          {% endif %}
+
+          {% if current_user.is_authenticated and user_lists %}
+          <section class="fd-section" aria-labelledby="fdStack">
+            <h2 class="fd-section__title" id="fdStack">Add to a stack</h2>
+            <form class="fd-stack-form" action="{{ url_for('add_film_to_user_list', imdb_id=movie.imdbID) }}" method="POST">
+              <label class="visually-hidden" for="fdStackSelect">Choose a stack</label>
+              <select name="list_id" id="fdStackSelect" class="form-control" required>
+                {% for lst in user_lists %}<option value="{{ lst.id }}">{{ lst.name }}</option>{% endfor %}
+              </select>
+              <button type="submit" class="fd-btn fd-btn--outline fd-btn--sm">Add</button>
+            </form>
+          </section>
+          {% endif %}
+        </section>
+
+      {# ---- Reviews ---- #}
+      <section class="fd-tabpanel" id="panel-reviews" role="tabpanel" aria-labelledby="tab-reviews" tabindex="0" data-fd-panel="reviews" hidden>
+        <div class="fd-section__head">
+          <h2 class="fd-section__title">Reviews</h2>
+          {% if current_user.is_authenticated %}
+          <button type="button" class="fd-btn fd-btn--primary fd-btn--sm" data-fd-action="write-review">Write a review</button>
+          {% else %}
+          <a class="fd-btn fd-btn--primary fd-btn--sm" href="{{ fd_login }}">Sign in to review</a>
           {% endif %}
         </div>
-        <div class="rate-review__text">
-          <label for="film-review-text" class="form-label"><span aria-hidden="true">✦</span> Your thoughts</label>
+
+        {% if current_user.is_authenticated %}
+        <form class="fd-review-form" id="fdReviewForm" action="{{ url_for('rate_film', imdb_id=movie.imdbID) }}" method="POST" hidden>
+          <div class="fd-review-form__row">
+            <span class="fd-review-form__label" id="fdReviewRatingLabel">Your rating</span>
+            <div class="star-rating fd-rate__stars" data-name="rating" data-value="{{ user_rating or 0 }}" role="group" aria-labelledby="fdReviewRatingLabel"></div>
+          </div>
+          <label class="fd-review-form__label" for="fdReviewText">Your thoughts</label>
           <textarea
-            class="form-control"
-            id="film-review-text"
+            class="form-control fd-review-form__text"
+            id="fdReviewText"
             name="content"
             rows="4"
             maxlength="1000"
             placeholder="What did you think? Share a few words about the film..."
           >{{ user_review or '' }}</textarea>
-          <div class="rate-review__counter">{{ (user_review or '')|length }}/1000</div>
-        </div>
-        <button type="submit" class="btn btn-primary">Save review</button>
-        <p class="rate-review__hint text-muted">Rating or reviewing saves to your diary and marks the film as seen.</p>
-      </form>
-    </div>
+          <input type="hidden" name="review_form" value="1">
+          <div class="fd-review-form__row fd-review-form__row--date">
+            <label class="fd-review-form__label" for="fdWatchedOn">Watched on</label>
+            <input class="form-control fd-review-form__date" type="date" id="fdWatchedOn" name="watched_date"
+                   value="{{ diary_entry.watched_date.isoformat() if diary_entry else today_iso }}" max="{{ today_iso }}" required>
+          </div>
+          <div class="fd-review-form__options">
+            <label class="fd-check">
+              <input type="checkbox" name="is_rewatch" value="1"{% if user_rewatch %} checked{% endif %}>
+              <span class="fd-check__box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+              <span class="fd-check__label">I&rsquo;ve watched this before</span>
+            </label>
+            <label class="fd-check">
+              <input type="checkbox" name="has_spoilers" value="1"{% if user_spoilers %} checked{% endif %}>
+              <span class="fd-check__box" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+              <span class="fd-check__label">This review contains spoilers</span>
+            </label>
+          </div>
+          <div class="fd-review-form__foot">
+            <span class="fd-review-form__counter" data-fd-counter-for="fdReviewText" aria-live="polite">{{ (user_review or '')|length }}/1000</span>
+            <button type="submit" class="fd-btn fd-btn--primary fd-btn--sm">Save review</button>
+          </div>
+          <p class="fd-review-form__hint">Your rating and review are shown on your profile and on this page.</p>
+        </form>
+        {% endif %}
 
-    {% if user_lists %}
-    <form class="form-panel mt-3" action="{{ url_for('add_film_to_user_list', imdb_id=movie.imdbID) }}" method="POST">
-      <label class="form-label">Add to stack</label>
-      <div class="d-flex gap-2 flex-wrap">
-        <select name="list_id" class="form-control" style="max-width:240px;" required>
-          {% for lst in user_lists %}
-          <option value="{{ lst.id }}">{{ lst.name }}</option>
+        {% if reviews %}
+        <ul class="fd-review-list" id="fdReviewList">
+          {% for post in reviews %}
+          <li class="fd-review" id="review-{{ post.id }}">
+            {{ fd_review_card(post) }}
+          </li>
           {% endfor %}
-        </select>
-        <button type="submit" class="btn btn-secondary">Add</button>
-      </div>
-    </form>
-    {% endif %}
-    {% else %}
-    <div class="action-strip">
-      <a class="btn btn-primary" href="{{ url_for('login') }}">Sign in to log & rate</a>
-    </div>
-    {% endif %}
-
-  </div>
-</section>
-
-{% if histogram and reviews %}
-<section class="band">
-  <div class="band-head"><h2>Ratings</h2></div>
-  <div class="rating-bars">
-    {% for bucket in histogram|reverse %}
-    <div class="rating-bar-row">
-      <span class="rating-bar-label">{{ bucket.stars }}★</span>
-      <div class="rating-bar-track"><div class="rating-bar-fill" style="width:{{ bucket.pct }}%"></div></div>
-      <span class="rating-bar-count">{{ bucket.count }}</span>
-    </div>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-{% if movie.Cast %}
-<section class="band">
-  <div class="band-head"><h2>Cast</h2></div>
-  <div class="cast-rail">
-    {% for person in movie.Cast %}
-    <a class="cast-card" href="{{ url_for('person_page', person_id=person.id) }}">
-      {% if person.photo %}
-        <img src="{{ person.photo }}" alt="{{ person.name }}">
-      {% else %}
-        <div class="cast-placeholder"></div>
-      {% endif %}
-      <strong>{{ person.name }}</strong>
-      <span>{{ person.character }}</span>
-    </a>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-{% if movie.Crew %}
-<section class="band">
-  <div class="band-head"><h2>Crew</h2></div>
-  <div class="cast-rail">
-    {% for person in movie.Crew %}
-    <a class="cast-card" href="{{ url_for('person_page', person_id=person.id) }}">
-      {% if person.photo %}
-        <img src="{{ person.photo }}" alt="{{ person.name }}">
-      {% else %}
-        <div class="cast-placeholder"></div>
-      {% endif %}
-      <strong>{{ person.name }}</strong>
-      <span>{{ person.job }}</span>
-    </a>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-{% if movie.Similar %}
-<section class="band">
-  <div class="band-head"><h2>Similar Films</h2></div>
-  <div class="poster-rail">
-    {% for sim in movie.Similar %}
-    <a class="poster-card" href="{{ url_for('film_page', imdb_id=sim.imdbID) }}">
-      <div class="poster-tile">
-        <img src="{{ sim.Poster }}" alt="{{ sim.Title }}">
-      </div>
-      <h5>{{ sim.Title }}</h5>
-    </a>
-    {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-<section class="band">
-  <div class="band-head">
-    <h2>Reviews</h2>
-  </div>
-  <div class="review-stream">
-    {% for post in reviews %}
-    <article class="review-row">
-      <div class="poster-tile">
-        <img src="{{ post.poster_url or 'https://via.placeholder.com/200x300?text=No+Poster' }}" alt="">
-      </div>
-      <div class="review-meta">
-        <div class="stars-display" data-rating="{{ post.rating }}" style="--fill: {{ (post.rating / 10 * 100)|round }}%"></div>
-        <p class="byline">
-          {% if post.author %}
-            <a href="{{ url_for('user_profile', username=post.author.username) }}">{{ post.author.username }}</a>
+        </ul>
+        {% else %}
+        <div class="fd-empty">
+          <p>No reviews yet. Be the first to share what you thought.</p>
+          {% if current_user.is_authenticated %}
+          <button type="button" class="fd-btn fd-btn--primary" data-fd-action="write-review">Write the first review</button>
+          {% else %}
+          <a class="fd-btn fd-btn--primary" href="{{ fd_login }}">Sign in to write the first review</a>
           {% endif %}
-          · {{ post.created_at.strftime('%b %d, %Y') }}
-        </p>
-        {% if post.content and not post.content.startswith('Rated ') %}
-        <p class="body-text">{{ post.content }}</p>
+        </div>
+        {% endif %}
+      </section>
+
+      {# ---- Cast & Crew ---- #}
+      {% if fd_has_people %}
+      <section class="fd-tabpanel" id="panel-cast" role="tabpanel" aria-labelledby="tab-cast" tabindex="0" data-fd-panel="cast" hidden>
+        {% if movie.Cast %}
+        <section class="fd-section fd-section--first" aria-labelledby="fdCast">
+          <h2 class="fd-section__title" id="fdCast">Cast</h2>
+          <div class="fd-rail" data-fd-rail>
+            <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll cast left" hidden>&#8249;</button>
+            <div class="fd-rail__track" role="group" aria-label="Cast" tabindex="0">
+              {% for person in movie.Cast %}{{ fd_person_card(person, person.character) }}{% endfor %}
+            </div>
+            <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll cast right" hidden>&#8250;</button>
+          </div>
+        </section>
+        {% endif %}
+        {% if movie.Crew %}
+        <section class="fd-section" aria-labelledby="fdCrew">
+          <h2 class="fd-section__title" id="fdCrew">Crew</h2>
+          <div class="fd-rail" data-fd-rail>
+            <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll crew left" hidden>&#8249;</button>
+            <div class="fd-rail__track" role="group" aria-label="Crew" tabindex="0">
+              {% for person in movie.Crew %}{{ fd_person_card(person, person.job) }}{% endfor %}
+            </div>
+            <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll crew right" hidden>&#8250;</button>
+          </div>
+        </section>
+        {% endif %}
+      </section>
+      {% endif %}
+
+        {# ---- Media ---- #}
+        {% if fd_has_media %}
+        <section class="fd-tabpanel" id="panel-media" role="tabpanel" aria-labelledby="tab-media" tabindex="0" data-fd-panel="media" hidden>
+          {% if fd_videos %}
+          <section class="fd-section fd-section--first" aria-labelledby="fdVideos">
+            <h2 class="fd-section__title" id="fdVideos">Videos</h2>
+            <div class="fd-media-grid fd-media-grid--videos">
+              {% for v in fd_videos %}
+              <button type="button" class="fd-vid" data-fd-trailer="{{ v.url }}">
+                <span class="fd-vid__thumb">
+                  <img src="{{ v.thumb }}" alt="" loading="lazy" width="320" height="180">
+                  <span class="fd-vid__play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg></span>
+                </span>
+                <span class="fd-vid__title" title="{{ v.name }}">{{ v.name }}</span>
+              </button>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
+          {% if movie.Backdrops %}
+          <section class="fd-section{% if not fd_videos %} fd-section--first{% endif %}" aria-labelledby="fdBackdrops">
+            <h2 class="fd-section__title" id="fdBackdrops">Backdrops</h2>
+            <div class="fd-media-grid">
+              {% for item in movie.Backdrops %}
+              <a class="fd-media-grid__item" href="{{ item.full }}" target="_blank" rel="noopener noreferrer">
+                <img src="{{ item.thumb }}" alt="{{ movie.Title }} backdrop {{ loop.index }}" loading="lazy" width="400" height="225">
+              </a>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
+          {% if movie.Posters %}
+          <section class="fd-section{% if not fd_videos and not movie.Backdrops %} fd-section--first{% endif %}" aria-labelledby="fdPosters">
+            <h2 class="fd-section__title" id="fdPosters">Posters</h2>
+            <div class="fd-rail" data-fd-rail>
+              <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll posters left" hidden>&#8249;</button>
+              <div class="fd-rail__track" role="group" aria-label="Posters" tabindex="0">
+                {% for item in movie.Posters %}
+                <a class="fd-similar" href="{{ item.full }}" target="_blank" rel="noopener noreferrer">
+                  <img src="{{ item.thumb }}" alt="{{ movie.Title }} poster {{ loop.index }}" loading="lazy" width="150" height="225">
+                </a>
+                {% endfor %}
+              </div>
+              <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll posters right" hidden>&#8250;</button>
+            </div>
+          </section>
+          {% endif %}
+        </section>
         {% endif %}
       </div>
-    </article>
-    {% else %}
-    <div class="empty-state">No reviews yet. Be the first to write one.</div>
-    {% endfor %}
-  </div>
-</section>
+    </div>
+
+    {# ---- Right: Where to Watch + Rating Breakdown ---- #}
+    <aside class="fd-dash__aside" aria-label="Where to watch and rating breakdown">
+      <section class="fd-card fd-wtw{% if not watch_online %} fd-wtw--empty{% endif %}" aria-labelledby="fdWtwTitle">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdWtwTitle">Where to Watch</h2>
+          <a class="fd-wtw__attr" href="{{ fd_justwatch }}" target="_blank" rel="noopener noreferrer" title="Streaming availability data provided by JustWatch">
+            JustWatch
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg>
+            <span class="visually-hidden">(opens in a new tab)</span>
+          </a>
+        </div>
+        {% if watch_online %}
+        <ul class="fd-wtw__grid">
+          {% for option in watch_online %}
+          <li>
+            <a class="fd-wtw__item" href="{{ option.url }}" target="_blank" rel="noopener noreferrer" title="{{ option.name }}{% if option.label %} &middot; {{ option.label }}{% endif %}">
+              <span class="fd-wtw__logo">
+                {% if option.logo %}<img src="{{ option.logo }}" alt="" loading="lazy" width="48" height="48">{% else %}<span aria-hidden="true">{{ option.name[:1] }}</span>{% endif %}
+              </span>
+              <span class="fd-wtw__name">{{ option.name }}</span>
+              <span class="visually-hidden">{% if option.label %}({{ option.label }}), {% endif %}opens in a new tab</span>
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="fd-card__empty">Not available to stream in your region.</p>
+        {% endif %}
+      </section>
+
+      {# Rating Breakdown: our own ratings only (stats.distribution = {1..5: count}). #}
+      <section class="fd-card fd-breakdown" aria-labelledby="fdBreakTitle">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdBreakTitle">Rating Breakdown</h2>
+          {% if stats.rating_count %}<span class="fd-breakdown__total">{{ stats.rating_count|compact }} rating{{ '' if stats.rating_count == 1 else 's' }}</span>{% endif %}
+        </div>
+        {% if stats.rating_count %}
+        <ul class="fd-breakdown__list">
+          {% for star in [5, 4, 3, 2, 1] %}
+          {% set n = stats.distribution[star] %}
+          {% set pct = (n * 100 / stats.rating_count)|round(1) %}
+          <li class="fd-breakdown__row">
+            <span class="fd-breakdown__label">{{ star }}<span aria-hidden="true">&#9733;</span><span class="visually-hidden"> star{{ '' if star == 1 else 's' }}</span></span>
+            <span class="fd-breakdown__bar" aria-hidden="true"><span style="width: {{ pct }}%"></span></span>
+            <span class="fd-breakdown__pct">{{ pct|round|int }}%</span>
+            <span class="fd-breakdown__count">{{ n|compact }}<span class="visually-hidden"> rating{{ '' if n == 1 else 's' }}</span></span>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="fd-card__empty fd-breakdown__empty">No ratings yet</p>
+        {% endif %}
+      </section>
+    </aside>
+
+    {# ---- Row 2 + 3: two cards each (Overview tab only; hidden via data-fd-overview-only) ---- #}
+    <div class="fd-dash__rows" data-fd-overview-only>
+
+      {# ---- Row 2, left: Cast & Crew ---- #}
+      <section class="fd-card fd-card--cast" aria-labelledby="fdCardCast">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdCardCast">Cast &amp; Crew</h2>
+          {% if fd_has_people %}<button type="button" class="fd-link" data-fd-goto="cast">View All</button>{% endif %}
+        </div>
+        {% if movie.PeoplePreview %}
+        <ul class="fd-people" aria-label="Cast and crew">
+          {% for person in movie.PeoplePreview %}
+          <li>
+            <a class="fd-avatar" href="{{ url_for('person_page', person_id=person.id) }}">
+              <span class="fd-avatar__img">
+                <span class="fd-avatar__initials" aria-hidden="true">{{ person.initials or '?' }}</span>
+                {% if person.photo %}<img src="{{ person.photo }}" alt="" loading="lazy" width="80" height="80" data-fd-avatar>{% endif %}
+              </span>
+              <strong class="fd-avatar__name" title="{{ person.name }}">{{ person.name }}</strong>
+              {% if person.role %}<span class="fd-avatar__role" title="{{ person.role }}">{{ person.role }}</span>{% endif %}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="fd-card__empty">Cast and crew details aren't available yet.</p>
+        {% endif %}
+      </section>
+
+      {# ---- Row 2, right: Media ---- #}
+      <section class="fd-card fd-card--media" aria-labelledby="fdCardMedia">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdCardMedia">Media</h2>
+          {% if fd_has_media %}<button type="button" class="fd-link" data-fd-goto="media">View All</button>{% endif %}
+        </div>
+        {% if fd_media_ns.first %}
+        <div class="fd-pills" role="group" aria-label="Media type">
+          {% for key, label, items in fd_media if items %}
+          <button type="button" class="fd-pill" aria-pressed="{{ 'true' if key == fd_media_ns.first else 'false' }}" data-fd-media-pill="{{ key }}">{{ label }} <span>{{ items|length }}</span></button>
+          {% endfor %}
+        </div>
+        {% for key, label, items in fd_media if items %}
+        <div class="fd-rail fd-media-group" data-fd-rail data-fd-media-group="{{ key }}"{% if key != fd_media_ns.first %} hidden{% endif %}>
+          <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll {{ label|lower }} left" hidden>&#8249;</button>
+          <div class="fd-rail__track" role="group" aria-label="{{ label }}" tabindex="0">
+            {% if key == 'trailers' or key == 'clips' %}
+              {% for v in items %}
+              <button type="button" class="fd-vid{% if loop.first %} is-active{% endif %}" data-fd-trailer="{{ v.url }}">
+                <span class="fd-vid__thumb">
+                  <img src="{{ v.thumb }}" alt="" loading="lazy" width="320" height="180">
+                  <span class="fd-vid__play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg></span>
+                </span>
+                <span class="fd-vid__title" title="{{ v.name }}">{{ v.name }}</span>
+              </button>
+              {% endfor %}
+            {% elif key == 'images' %}
+              {% for item in items %}
+              <a class="fd-vid" href="{{ item.full }}" target="_blank" rel="noopener noreferrer">
+                <span class="fd-vid__thumb"><img src="{{ item.thumb }}" alt="{{ movie.Title }} image {{ loop.index }}" loading="lazy" width="320" height="180"></span>
+              </a>
+              {% endfor %}
+            {% else %}
+              {% for item in items %}
+              <a class="fd-vid fd-vid--poster" href="{{ item.full }}" target="_blank" rel="noopener noreferrer">
+                <span class="fd-vid__thumb"><img src="{{ item.thumb }}" alt="{{ movie.Title }} poster {{ loop.index }}" loading="lazy" width="150" height="225"></span>
+              </a>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll {{ label|lower }} right" hidden>&#8250;</button>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="fd-card__empty">No trailers or images yet.</p>
+        {% endif %}
+      </section>
+
+      {# ---- Row 3, left: User Reviews ---- #}
+      <section class="fd-card fd-card--reviews" aria-labelledby="fdCardReviews">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdCardReviews">User Reviews</h2>
+          {% if reviews %}<button type="button" class="fd-link" data-fd-goto="reviews">View All</button>{% endif %}
+        </div>
+        {% if review_previews %}
+        <ul class="fd-review-list">
+          {% for post in review_previews[:3] %}
+          <li class="fd-review">
+            {{ fd_review_card(post) }}
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <div class="fd-empty fd-empty--flat">
+          <p>{{ 'No written reviews yet.' if reviews else 'No reviews yet' }}</p>
+          {% if current_user.is_authenticated %}
+          <button type="button" class="fd-btn fd-btn--primary fd-btn--sm" data-fd-action="write-review">Write the first review</button>
+          {% else %}
+          <a class="fd-btn fd-btn--primary fd-btn--sm" href="{{ fd_login }}">Sign in to write the first review</a>
+          {% endif %}
+        </div>
+        {% endif %}
+      </section>
+
+      {# ---- Row 3, right: Similar Movies ---- #}
+      <section class="fd-card fd-card--similar" aria-labelledby="fdCardSimilar">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdCardSimilar">Similar Movies</h2>
+        </div>
+        {% if movie.Similar %}
+        <div class="fd-rail" data-fd-rail>
+          <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll similar movies left" hidden>&#8249;</button>
+          <div class="fd-rail__track" role="group" aria-label="Similar movies" tabindex="0">
+            {% for sim in movie.Similar[:8] %}
+            <a class="fd-similar fd-similar--sm" href="{{ url_for('film_page', imdb_id=sim.imdbID) }}">
+              <img src="{{ sim.Poster }}" alt="{{ sim.Title }} poster" loading="lazy" width="150" height="225">
+              <span class="fd-similar__title" title="{{ sim.Title }}">{{ sim.Title }}</span>
+              {% if sim.Year and sim.Year != 'N/A' %}<span class="fd-similar__year">{{ sim.Year }}</span>{% endif %}
+            </a>
+            {% endfor %}
+          </div>
+          <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll similar movies right" hidden>&#8250;</button>
+        </div>
+        {% else %}
+        <p class="fd-card__empty">No similar films found.</p>
+        {% endif %}
+      </section>
+
+    </div>
   </div>
 
-  {% if movie.Trailer %}
+  {% if fd_trailer or fd_videos %}
   <div class="film-trailer-modal" id="filmTrailerModal" hidden>
     <div class="film-trailer-modal__backdrop" data-trailer-close></div>
     <div class="film-trailer-modal__dialog" role="dialog" aria-modal="true" aria-label="{{ movie.Title }} trailer">
-      <button type="button" class="film-trailer-modal__close" data-trailer-close aria-label="Close trailer">×</button>
+      <button type="button" class="film-trailer-modal__close" data-trailer-close aria-label="Close trailer">&times;</button>
       <div class="film-trailer-modal__frame" id="filmTrailerFrame"></div>
     </div>
   </div>
-  <script>
-  (function () {
-    const playBtn = document.querySelector('.film-cover__play');
-    const modal = document.getElementById('filmTrailerModal');
-    const frameHost = document.getElementById('filmTrailerFrame');
-    if (!playBtn || !modal || !frameHost) return;
-
-    function youtubeEmbedUrl(url) {
-      if (!url) return null;
-      try {
-        const parsed = new URL(url);
-        if (parsed.hostname.includes('youtu.be')) {
-          return 'https://www.youtube.com/embed/' + parsed.pathname.replace(/^\//, '') + '?autoplay=1&rel=0';
-        }
-        const id = parsed.searchParams.get('v');
-        if (id) return 'https://www.youtube.com/embed/' + id + '?autoplay=1&rel=0';
-      } catch (err) {
-        return null;
-      }
-      return null;
-    }
-
-    function closeModal() {
-      modal.hidden = true;
-      frameHost.innerHTML = '';
-      document.body.style.overflow = '';
-    }
-
-    function openModal(url) {
-      const embed = youtubeEmbedUrl(url);
-      if (embed) {
-        frameHost.innerHTML = '<iframe src="' + embed + '" title="Trailer" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
-        modal.hidden = false;
-        document.body.style.overflow = 'hidden';
-        return;
-      }
-      window.open(url, '_blank', 'noopener,noreferrer');
-    }
-
-    playBtn.addEventListener('click', function () {
-      openModal(playBtn.dataset.trailerUrl);
-    });
-
-    modal.querySelectorAll('[data-trailer-close]').forEach(function (el) {
-      el.addEventListener('click', closeModal);
-    });
-
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && !modal.hidden) closeModal();
-    });
-  })();
-  </script>
   {% endif %}
+  <script src="{{ url_for('static', filename='film.js') }}" defer></script>
 </div>
 
 {% elif view == "series" %}
@@ -940,151 +1249,472 @@
 {% endif %}
 
 {% elif view == "series_detail" %}
-<div class="film-page{% if show.Backdrop or show.Trailer %} has-cover{% endif %}">
-  {% if show.Backdrop %}
-  <div class="film-cover">
-    <img class="film-cover__img" src="{{ show.Backdrop }}" alt="">
-    <div class="film-cover__fade"></div>
-    {% if show.Trailer %}
-    <button
-      type="button"
-      class="film-cover__play"
-      data-trailer-url="{{ show.Trailer }}"
-      aria-label="Play {{ show.Title }} trailer"
-    >
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
-    </button>
-    {% endif %}
-  </div>
-  {% elif show.Trailer %}
-  <div class="film-cover film-cover--compact">
-    <button
-      type="button"
-      class="film-cover__play"
-      data-trailer-url="{{ show.Trailer }}"
-      aria-label="Play {{ show.Title }} trailer"
-    >
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
-    </button>
+{# Series detail: same layout as the film page (.fd). Styles: static/style.css ("Film detail page" + "Series page" sections). Behaviour: static/film.js. #}
+{% set fd_poster = show.Poster if show.Poster and show.Poster != 'N/A' else 'https://via.placeholder.com/300x450?text=No+Poster' %}
+{% set fd_login = url_for('login', next=request.path) %}
+{% set fd_blurb = show.Tagline or (show.Plot if show.Plot and show.Plot != 'No overview available.' else '') %}
+{% set fd_trailer = show.Trailer or '' %}
+{% set fd_has_people = show.Cast or show.Crew %}
+{% set fd_has_media = show.Backdrops or show.Posters or show.Videos %}
+{% set fd_videos = show.Videos or [] %}
+{% set fd_trailers = fd_videos|selectattr('group', 'equalto', 'trailers')|list %}
+{% set fd_clips = fd_videos|selectattr('group', 'equalto', 'clips')|list %}
+{% set fd_media = [('trailers', 'Trailers', fd_trailers), ('clips', 'Clips', fd_clips), ('images', 'Images', show.Backdrops or []), ('posters', 'Posters', show.Posters or [])] %}
+{% set fd_media_ns = namespace(first=None) %}
+{% for key, label, items in fd_media %}{% if items and not fd_media_ns.first %}{% set fd_media_ns.first = key %}{% endif %}{% endfor %}
+{% set fd_justwatch = watch_online[0].url if watch_online and watch_online[0].url and watch_online[0].url != '#' else 'https://www.justwatch.com/' %}
+<div class="fd fd--series">
+
+  {% if show.BackdropW780 %}
+  <div class="fd-ambient" aria-hidden="true">
+    <img src="{{ show.BackdropW780 }}" alt="" width="780" height="439" decoding="async" fetchpriority="low">
   </div>
   {% endif %}
-  <div class="page-shell film-page__body">
-<section class="film-hub film-hub--series">
-  {% if overall_rating is not none %}
-  <div class="series-score-edge" aria-label="Your overall series score {{ overall_rating|round(1) }} out of 10 from {{ rated_count }} episodes">
-    <span class="series-score-edge__label">Your score</span>
-    <span class="series-score-edge__main">
-      <strong class="series-score-edge__value">{{ overall_rating|round(1) }}</strong>
-      <span class="series-score-edge__scale">/10</span>
-    </span>
-    <span class="series-score-edge__stars stars-display" data-rating="{{ overall_rating|round(1) }}"></span>
-    <span class="series-score-edge__sub">{{ (overall_rating / 2)|round(1) }}/5 · {{ rated_count }} ep</span>
-  </div>
-  {% elif current_user.is_authenticated %}
-  <div class="series-score-edge series-score-edge--empty" aria-label="No series score yet">
-    <span class="series-score-edge__label">Your score</span>
-    <span class="series-score-edge__main">
-      <strong class="series-score-edge__value">—</strong>
-      <span class="series-score-edge__scale">/10</span>
-    </span>
-    <span class="series-score-edge__sub">Rate episodes below</span>
-  </div>
-  {% endif %}
-  <div class="film-hub__poster poster-tile">
-    <img src="{{ show.Poster or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ show.Title }}">
-    <div class="film-hub__poster-meta">
-      <span>{{ show.Year }}</span>
-      {% if show.number_of_seasons %}<span>{{ show.number_of_seasons }} season{% if show.number_of_seasons != 1 %}s{% endif %}</span>{% endif %}
-      {% if show.Genre and show.Genre != 'N/A' %}<span>{{ show.Genre.split(',')[0] }}</span>{% endif %}
-    </div>
-  </div>
-  <div class="film-hub__meta">
-    <p class="eyebrow">Series</p>
-    <h1>{{ show.Title }}</h1>
-    <p class="tagline-meta">
-      {{ show.Year }}
-      {% if show.Genre and show.Genre != 'N/A' %} · {{ show.Genre }}{% endif %}
-      {% if show.status %} · {{ show.status }}{% endif %}
-      {% if show.imdbRating and show.imdbRating != 'N/A' %} · TMDB {{ show.imdbRating }}{% endif %}
-    </p>
 
-    <p class="film-hub__plot">{{ show.Plot }}</p>
-
-    {% if is_upcoming and cant_miss %}
-    {{ cant_miss_widget('tv', show.tmdb_id, cant_miss) }}
+  {# ---------------- Hero ---------------- #}
+  <section class="fd-hero{% if not show.Backdrop %} fd-hero--noimg{% endif %}" aria-labelledby="fdTitle">
+    <div class="fd-hero__bg" aria-hidden="true"></div>
+    {% if show.Backdrop %}
+    <img
+      class="fd-hero__img"
+      src="{{ show.BackdropW1280 or show.Backdrop }}"
+      {% if show.BackdropW780 and show.BackdropW1280 %}srcset="{{ show.BackdropW780 }} 780w, {{ show.BackdropW1280 }} 1280w, {{ show.Backdrop }} 1920w" sizes="100vw"{% endif %}
+      alt=""
+      width="1280"
+      height="720"
+      fetchpriority="high"
+      decoding="async"
+    >
     {% endif %}
+    <div class="fd-hero__shade" aria-hidden="true"></div>
 
-    {{ watch_online_section(watch_online) }}
+    <div class="fd-container fd-hero__inner">
+      <div class="fd-hero__copy">
+        <h1 id="fdTitle" class="fd-hero__title{% if show.Logo %} has-logo{% endif %}">
+          {% if show.Logo %}
+          <img class="fd-hero__logo" src="{{ show.Logo }}" alt="" data-fd-logo>
+          {% endif %}
+          <span class="fd-hero__title-text">{{ show.Title }}</span>
+        </h1>
 
-    <div class="schedule-pills series-seasons" role="tablist" aria-label="Seasons">
-      {% for s in seasons %}
-      <a
-        class="schedule-pill{% if s.number == selected_season %} is-active{% endif %}"
-        href="{{ url_for('series_page', tmdb_id=show.tmdb_id, season=s.number) }}"
-      >{{ s.name }}</a>
-      {% endfor %}
-    </div>
-  </div>
-</section>
-
-<section class="band series-episodes">
-  <div class="band-head">
-    <h2>{{ season.name }}</h2>
-    <span class="text-muted" style="font-family:var(--font-body);font-size:0.82rem;">
-      {{ season.episodes|length }} episode{% if season.episodes|length != 1 %}s{% endif %}
-    </span>
-  </div>
-
-  {% if season.episodes %}
-  <div class="series-episode-list">
-    {% for ep in season.episodes %}
-    <article class="series-episode">
-      <div class="series-episode__info">
-        {% if ep.still %}
-        <img class="series-episode__still" src="{{ ep.still }}" alt="" loading="lazy">
-        {% else %}
-        <div class="series-episode__still series-episode__still--empty" aria-hidden="true"></div>
+        {% if show.MetaParts %}
+        <ul class="fd-meta" aria-label="Series details">
+          {% for part in show.MetaParts %}<li>{{ part }}</li>{% endfor %}
+        </ul>
         {% endif %}
-        <div class="series-episode__copy">
-          <p class="series-episode__label">Episode {{ ep.number }}</p>
-          <h3 class="series-episode__title">{{ ep.title }}</h3>
-          <p class="series-episode__meta">{{ ep.air_label }}{% if ep.overview %} · {{ ep.overview }}{% endif %}</p>
+
+        {% if fd_blurb %}
+        <p class="fd-hero__blurb">{{ fd_blurb }}</p>
+        {% endif %}
+
+        <div class="fd-actions">
+          <button type="button" class="fd-btn fd-btn--primary" data-fd-goto="episodes">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2.6l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17.4l-6 3.3 1.3-6.6L2.4 9.5l6.7-.8L12 2.6z"/></svg>
+            Rate Episodes
+          </button>
+
+          {% if not current_user.is_authenticated %}
+          <a class="fd-btn fd-btn--ghost" href="{{ fd_login }}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            Watchlist
+          </a>
+          {% else %}
+          {# Same toggle as the Watchlist stat below; static/engage.js keeps the two in sync. #}
+          <form class="fd-inline-form engage-form" action="{{ url_for('series_watchlist', tmdb_id=show.tmdb_id) }}" method="POST" data-engage-form="watchlist">
+            <button type="submit" class="fd-btn fd-btn--ghost{% if engage.watchlist.active %} is-on{% endif %}" aria-pressed="{{ 'true' if engage.watchlist.active else 'false' }}">
+              <svg class="fd-btn__off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+              <svg class="fd-btn__on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+              <span data-on="In Watchlist" data-off="Watchlist">{{ 'In Watchlist' if engage.watchlist.active else 'Watchlist' }}</span>
+            </button>
+          </form>
+          {% endif %}
+
+          <div class="fd-menu" data-fd-menu>
+            <button type="button" class="fd-btn fd-btn--ghost fd-btn--icon" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" data-fd-menu-toggle>
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.9"/><circle cx="12" cy="12" r="1.9"/><circle cx="19" cy="12" r="1.9"/></svg>
+            </button>
+            <div class="fd-menu__list" role="menu" aria-label="More actions" hidden>
+              <button type="button" role="menuitem" class="fd-menu__item" data-fd-copy-link>Copy link</button>
+              <button type="button" role="menuitem" class="fd-menu__item" data-fd-share hidden>Share&hellip;</button>
+            </div>
+          </div>
         </div>
       </div>
+    </div>
 
-      <div class="series-episode__rate">
-        {% if current_user.is_authenticated %}
-        <form
-          class="episode-rating-form"
-          method="POST"
-          action="{{ url_for('rate_episode', tmdb_id=show.tmdb_id, season=selected_season, episode=ep.number) }}"
-        >
-          <span class="series-episode__rate-label">Your rating</span>
-          <div class="star-rating" data-name="rating" data-value="{{ ep.user_rating or 0 }}"></div>
-        </form>
-        {% else %}
-        <a class="btn btn-sm btn-secondary" href="{{ url_for('login', next=request.path) }}">Sign in to rate</a>
+    {% if fd_trailer %}
+    <button type="button" class="fd-hero__play" data-fd-trailer="{{ fd_trailer }}" aria-label="Play {{ show.Title }} trailer">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg>
+    </button>
+    {% endif %}
+  </section>
+
+  {# ---------------- Dashboard ---------------- #}
+  <div class="fd-dash">
+
+    <figure class="fd-dash__poster fd-pcard">
+      <div class="fd-pcard__stage">
+        <img src="{{ fd_poster }}" alt="{{ show.Title }} poster" width="300" height="450" data-fd-poster>
+      </div>
+    </figure>
+
+    <div class="fd-dash__main">
+      <div class="fd-stats" aria-label="Series stats">
+        <article class="fd-stat">
+          <span class="fd-stat__icon fd-stat__icon--star" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.6l2.9 6.1 6.7.8-4.9 4.6 1.3 6.6L12 17.4l-6 3.3 1.3-6.6L2.4 9.5l6.7-.8L12 2.6z"/></svg>
+          </span>
+          <div class="fd-stat__body">
+            {% if overall_rating is not none %}
+            <p class="fd-stat__value">{{ overall_rating|round(1) }}<small>/10</small></p>
+            <p class="fd-stat__label">Your Score</p>
+            <p class="fd-stat__sub">{{ rated_count }} episode{{ '' if rated_count == 1 else 's' }} rated</p>
+            {% elif show.imdbRating and show.imdbRating != 'N/A' %}
+            <p class="fd-stat__value">{{ show.imdbRating }}<small>/10</small></p>
+            <p class="fd-stat__label">TMDB Rating</p>
+            <p class="fd-stat__sub">{{ 'Rate episodes for your score' if current_user.is_authenticated else 'Sign in to rate episodes' }}</p>
+            {% else %}
+            <p class="fd-stat__value fd-stat__value--empty" aria-label="No rating yet">&mdash;</p>
+            <p class="fd-stat__label">Your Score</p>
+            <p class="fd-stat__sub">{{ 'Rate episodes below' if current_user.is_authenticated else 'Sign in to rate episodes' }}</p>
+            {% endif %}
+          </div>
+        </article>
+
+        {{ engage_button('recommend', 'tv', show.tmdb_id, engage.recommend, 'stat') }}
+        {{ engage_button('watchlist', 'tv', show.tmdb_id, engage.watchlist, 'stat') }}
+      </div>
+
+      <div class="fd-panel">
+        <span class="fd-anchor" id="episodes" aria-hidden="true"></span>
+        <div class="fd-tabs" role="tablist" aria-label="Series sections">
+          <button type="button" role="tab" class="fd-tab" id="tab-overview" aria-controls="panel-overview" aria-selected="true" tabindex="0" data-fd-tab="overview">Overview</button>
+          <button type="button" role="tab" class="fd-tab" id="tab-episodes" aria-controls="panel-episodes" aria-selected="false" tabindex="-1" data-fd-tab="episodes">Episodes{% if season.episodes %} <span class="fd-tab__count">{{ season.episodes|length }}</span>{% endif %}</button>
+          {% if fd_has_people %}
+          <button type="button" role="tab" class="fd-tab" id="tab-cast" aria-controls="panel-cast" aria-selected="false" tabindex="-1" data-fd-tab="cast">Cast &amp; Crew</button>
+          {% endif %}
+          {% if fd_has_media %}
+          <button type="button" role="tab" class="fd-tab" id="tab-media" aria-controls="panel-media" aria-selected="false" tabindex="-1" data-fd-tab="media">Media</button>
+          {% endif %}
+        </div>
+
+        {# ---- Overview ---- #}
+        <section class="fd-tabpanel fd-tabpanel--overview" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" tabindex="0" data-fd-panel="overview">
+          <div class="fd-overview__story">
+            {% if show.Plot and show.Plot != 'No overview available.' %}
+            <p class="fd-synopsis" id="fdSynopsis" data-fd-synopsis>{{ show.Plot }}</p>
+            <button type="button" class="fd-link fd-readmore" data-fd-readmore aria-expanded="false" aria-controls="fdSynopsis" hidden>Read more</button>
+            {% else %}
+            <p class="fd-synopsis fd-synopsis--empty">No synopsis available yet.</p>
+            {% endif %}
+            {% if show.GenreList or show.RuntimeShort %}
+            <ul class="fd-chips" aria-label="Genres and runtime">
+              {% for g in show.GenreList %}<li class="fd-chip">{{ g }}</li>{% endfor %}
+              {% if show.RuntimeShort %}
+              <li class="fd-chip fd-chip--time">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                {{ show.RuntimeShort }} / episode
+              </li>
+              {% endif %}
+            </ul>
+            {% endif %}
+          </div>
+
+          <dl class="fd-meta-grid" aria-label="About this series">
+            <div><dt>Created by</dt><dd>{{ show.Creators or '&mdash;'|safe }}</dd></div>
+            <div><dt>Status</dt><dd>{{ show.status or '&mdash;'|safe }}</dd></div>
+            <div><dt>Seasons</dt><dd>{{ show.number_of_seasons or '&mdash;'|safe }}{% if show.episode_total %} &middot; {{ show.episode_total }} episodes{% endif %}</dd></div>
+            <div><dt>First Aired</dt><dd>{{ show.FirstAirShort or '&mdash;'|safe }}</dd></div>
+            <div><dt>Network</dt><dd>{{ show.Networks or '&mdash;'|safe }}</dd></div>
+            <div><dt>Language</dt><dd>{{ show.Language or '&mdash;'|safe }}</dd></div>
+            <div><dt>Country</dt><dd>{{ show.Country or '&mdash;'|safe }}</dd></div>
+          </dl>
+
+          {% if is_upcoming and cant_miss %}
+          <div class="fd-overview__cantmiss">{{ cant_miss_widget('tv', show.tmdb_id, cant_miss) }}</div>
+          {% endif %}
+        </section>
+
+        {# ---- Episodes ---- #}
+        <section class="fd-tabpanel" id="panel-episodes" role="tabpanel" aria-labelledby="tab-episodes" tabindex="0" data-fd-panel="episodes" hidden>
+          <div class="fd-pills fd-seasons" role="navigation" aria-label="Seasons">
+            {% for s in seasons %}
+            <a class="fd-pill"{% if s.number == selected_season %} aria-current="true" aria-pressed="true"{% endif %} href="{{ url_for('series_page', tmdb_id=show.tmdb_id, season=s.number, _anchor='episodes') }}">{{ s.name }}</a>
+            {% endfor %}
+          </div>
+
+          <div class="fd-section__head fd-episodes__head">
+            <h2 class="fd-section__title">{{ season.name }}</h2>
+            <span class="fd-episodes__count">{{ season.episodes|length }} episode{{ '' if season.episodes|length == 1 else 's' }}</span>
+          </div>
+
+          {% if season.episodes %}
+          <ol class="fd-episodes">
+            {% for ep in season.episodes %}
+            <li class="fd-episode">
+              {% if ep.still %}
+              <img class="fd-episode__still" src="{{ ep.still }}" alt="" loading="lazy" width="160" height="90">
+              {% else %}
+              <div class="fd-episode__still fd-episode__still--empty" aria-hidden="true"></div>
+              {% endif %}
+              <div class="fd-episode__copy">
+                <p class="fd-episode__label">Episode {{ ep.number }} &middot; {{ ep.air_label }}</p>
+                <h3 class="fd-episode__title">{{ ep.title }}</h3>
+                {% if ep.overview %}<p class="fd-episode__text">{{ ep.overview }}</p>{% endif %}
+              </div>
+              <div class="fd-episode__rate">
+                {% if current_user.is_authenticated %}
+                <form class="episode-rating-form" method="POST" action="{{ url_for('rate_episode', tmdb_id=show.tmdb_id, season=selected_season, episode=ep.number) }}">
+                  <span class="fd-episode__rate-label">Your rating</span>
+                  <div class="star-rating" data-name="rating" data-value="{{ ep.user_rating or 0 }}"></div>
+                </form>
+                {% else %}
+                <a class="fd-btn fd-btn--outline fd-btn--sm" href="{{ fd_login }}">Sign in to rate</a>
+                {% endif %}
+              </div>
+            </li>
+            {% endfor %}
+          </ol>
+          {% else %}
+          <p class="fd-card__empty">No episodes listed for this season yet.</p>
+          {% endif %}
+        </section>
+
+        {# ---- Cast & Crew ---- #}
+        {% if fd_has_people %}
+        <section class="fd-tabpanel" id="panel-cast" role="tabpanel" aria-labelledby="tab-cast" tabindex="0" data-fd-panel="cast" hidden>
+          {% if show.Cast %}
+          <section class="fd-section fd-section--first" aria-labelledby="fdCast">
+            <h2 class="fd-section__title" id="fdCast">Cast</h2>
+            <div class="fd-rail" data-fd-rail>
+              <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll cast left" hidden>&#8249;</button>
+              <div class="fd-rail__track" role="group" aria-label="Cast" tabindex="0">
+                {% for person in show.Cast %}{{ fd_person_card(person, person.character) }}{% endfor %}
+              </div>
+              <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll cast right" hidden>&#8250;</button>
+            </div>
+          </section>
+          {% endif %}
+          {% if show.Crew %}
+          <section class="fd-section" aria-labelledby="fdCrew">
+            <h2 class="fd-section__title" id="fdCrew">Crew</h2>
+            <div class="fd-rail" data-fd-rail>
+              <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll crew left" hidden>&#8249;</button>
+              <div class="fd-rail__track" role="group" aria-label="Crew" tabindex="0">
+                {% for person in show.Crew %}{{ fd_person_card(person, person.job) }}{% endfor %}
+              </div>
+              <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll crew right" hidden>&#8250;</button>
+            </div>
+          </section>
+          {% endif %}
+        </section>
+        {% endif %}
+
+        {# ---- Media ---- #}
+        {% if fd_has_media %}
+        <section class="fd-tabpanel" id="panel-media" role="tabpanel" aria-labelledby="tab-media" tabindex="0" data-fd-panel="media" hidden>
+          {% if fd_videos %}
+          <section class="fd-section fd-section--first" aria-labelledby="fdVideos">
+            <h2 class="fd-section__title" id="fdVideos">Videos</h2>
+            <div class="fd-media-grid fd-media-grid--videos">
+              {% for v in fd_videos %}
+              <button type="button" class="fd-vid" data-fd-trailer="{{ v.url }}">
+                <span class="fd-vid__thumb">
+                  <img src="{{ v.thumb }}" alt="" loading="lazy" width="320" height="180">
+                  <span class="fd-vid__play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg></span>
+                </span>
+                <span class="fd-vid__title" title="{{ v.name }}">{{ v.name }}</span>
+              </button>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
+          {% if show.Backdrops %}
+          <section class="fd-section{% if not fd_videos %} fd-section--first{% endif %}" aria-labelledby="fdBackdrops">
+            <h2 class="fd-section__title" id="fdBackdrops">Backdrops</h2>
+            <div class="fd-media-grid">
+              {% for item in show.Backdrops %}
+              <a class="fd-media-grid__item" href="{{ item.full }}" target="_blank" rel="noopener noreferrer">
+                <img src="{{ item.thumb }}" alt="{{ show.Title }} backdrop {{ loop.index }}" loading="lazy" width="400" height="225">
+              </a>
+              {% endfor %}
+            </div>
+          </section>
+          {% endif %}
+          {% if show.Posters %}
+          <section class="fd-section{% if not fd_videos and not show.Backdrops %} fd-section--first{% endif %}" aria-labelledby="fdPosters">
+            <h2 class="fd-section__title" id="fdPosters">Posters</h2>
+            <div class="fd-rail" data-fd-rail>
+              <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll posters left" hidden>&#8249;</button>
+              <div class="fd-rail__track" role="group" aria-label="Posters" tabindex="0">
+                {% for item in show.Posters %}
+                <a class="fd-similar" href="{{ item.full }}" target="_blank" rel="noopener noreferrer">
+                  <img src="{{ item.thumb }}" alt="{{ show.Title }} poster {{ loop.index }}" loading="lazy" width="150" height="225">
+                </a>
+                {% endfor %}
+              </div>
+              <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll posters right" hidden>&#8250;</button>
+            </div>
+          </section>
+          {% endif %}
+        </section>
         {% endif %}
       </div>
-    </article>
-    {% endfor %}
-  </div>
-  {% else %}
-  <div class="empty-state">No episodes listed for this season yet.</div>
-  {% endif %}
-</section>
-  </div>
-</div>
+    </div>
 
-  {% if show.Trailer %}
+    {# ---- Right: Where to Watch ---- #}
+    <aside class="fd-dash__aside" aria-label="Where to watch">
+      <section class="fd-card fd-wtw{% if not watch_online %} fd-wtw--empty{% endif %}" aria-labelledby="fdWtwTitle">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdWtwTitle">Where to Watch</h2>
+          <a class="fd-wtw__attr" href="{{ fd_justwatch }}" target="_blank" rel="noopener noreferrer" title="Streaming availability data provided by JustWatch">
+            JustWatch
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7"/><path d="M9 7h8v8"/></svg>
+            <span class="visually-hidden">(opens in a new tab)</span>
+          </a>
+        </div>
+        {% if watch_online %}
+        <ul class="fd-wtw__grid">
+          {% for option in watch_online %}
+          <li>
+            <a class="fd-wtw__item" href="{{ option.url }}" target="_blank" rel="noopener noreferrer" title="{{ option.name }}{% if option.label %} &middot; {{ option.label }}{% endif %}">
+              <span class="fd-wtw__logo">
+                {% if option.logo %}<img src="{{ option.logo }}" alt="" loading="lazy" width="48" height="48">{% else %}<span aria-hidden="true">{{ option.name[:1] }}</span>{% endif %}
+              </span>
+              <span class="fd-wtw__name">{{ option.name }}</span>
+              <span class="visually-hidden">{% if option.label %}({{ option.label }}), {% endif %}opens in a new tab</span>
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="fd-card__empty">Not available to stream in your region.</p>
+        {% endif %}
+      </section>
+    </aside>
+
+    {# ---- Overview-tab rows: Cast & Crew | Media, then Similar Series ---- #}
+    <div class="fd-dash__rows" data-fd-overview-only>
+
+      <section class="fd-card fd-card--cast" aria-labelledby="fdCardCast">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdCardCast">Cast &amp; Crew</h2>
+          {% if fd_has_people %}<button type="button" class="fd-link" data-fd-goto="cast">View All</button>{% endif %}
+        </div>
+        {% if show.PeoplePreview %}
+        <ul class="fd-people" aria-label="Cast and crew">
+          {% for person in show.PeoplePreview %}
+          <li>
+            <a class="fd-avatar" href="{{ url_for('person_page', person_id=person.id) }}">
+              <span class="fd-avatar__img">
+                <span class="fd-avatar__initials" aria-hidden="true">{{ person.initials or '?' }}</span>
+                {% if person.photo %}<img src="{{ person.photo }}" alt="" loading="lazy" width="80" height="80" data-fd-avatar>{% endif %}
+              </span>
+              <strong class="fd-avatar__name" title="{{ person.name }}">{{ person.name }}</strong>
+              {% if person.role %}<span class="fd-avatar__role" title="{{ person.role }}">{{ person.role }}</span>{% endif %}
+            </a>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+        <p class="fd-card__empty">Cast and crew details aren't available yet.</p>
+        {% endif %}
+      </section>
+
+      <section class="fd-card fd-card--media" aria-labelledby="fdCardMedia">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdCardMedia">Media</h2>
+          {% if fd_has_media %}<button type="button" class="fd-link" data-fd-goto="media">View All</button>{% endif %}
+        </div>
+        {% if fd_media_ns.first %}
+        <div class="fd-pills" role="group" aria-label="Media type">
+          {% for key, label, items in fd_media if items %}
+          <button type="button" class="fd-pill" aria-pressed="{{ 'true' if key == fd_media_ns.first else 'false' }}" data-fd-media-pill="{{ key }}">{{ label }} <span>{{ items|length }}</span></button>
+          {% endfor %}
+        </div>
+        {% for key, label, items in fd_media if items %}
+        <div class="fd-rail fd-media-group" data-fd-rail data-fd-media-group="{{ key }}"{% if key != fd_media_ns.first %} hidden{% endif %}>
+          <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll {{ label|lower }} left" hidden>&#8249;</button>
+          <div class="fd-rail__track" role="group" aria-label="{{ label }}" tabindex="0">
+            {% if key == 'trailers' or key == 'clips' %}
+              {% for v in items %}
+              <button type="button" class="fd-vid{% if loop.first %} is-active{% endif %}" data-fd-trailer="{{ v.url }}">
+                <span class="fd-vid__thumb">
+                  <img src="{{ v.thumb }}" alt="" loading="lazy" width="320" height="180">
+                  <span class="fd-vid__play" aria-hidden="true"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72L19 12 8 5.14z"/></svg></span>
+                </span>
+                <span class="fd-vid__title" title="{{ v.name }}">{{ v.name }}</span>
+              </button>
+              {% endfor %}
+            {% elif key == 'images' %}
+              {% for item in items %}
+              <a class="fd-vid" href="{{ item.full }}" target="_blank" rel="noopener noreferrer">
+                <span class="fd-vid__thumb"><img src="{{ item.thumb }}" alt="{{ show.Title }} image {{ loop.index }}" loading="lazy" width="320" height="180"></span>
+              </a>
+              {% endfor %}
+            {% else %}
+              {% for item in items %}
+              <a class="fd-vid fd-vid--poster" href="{{ item.full }}" target="_blank" rel="noopener noreferrer">
+                <span class="fd-vid__thumb"><img src="{{ item.thumb }}" alt="{{ show.Title }} poster {{ loop.index }}" loading="lazy" width="150" height="225"></span>
+              </a>
+              {% endfor %}
+            {% endif %}
+          </div>
+          <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll {{ label|lower }} right" hidden>&#8250;</button>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="fd-card__empty">No trailers or images yet.</p>
+        {% endif %}
+      </section>
+
+      <section class="fd-card fd-card--similar fd-card--wide" aria-labelledby="fdCardSimilar">
+        <div class="fd-card__head">
+          <h2 class="fd-card__title" id="fdCardSimilar">Similar Series</h2>
+        </div>
+        {% if show.Similar %}
+        <div class="fd-rail" data-fd-rail>
+          <button type="button" class="fd-rail__btn fd-rail__btn--prev" aria-label="Scroll similar series left" hidden>&#8249;</button>
+          <div class="fd-rail__track" role="group" aria-label="Similar series" tabindex="0">
+            {% for sim in show.Similar[:10] %}
+            <a class="fd-similar fd-similar--sm" href="{{ url_for('series_page', tmdb_id=sim.tmdb_id) }}">
+              <img src="{{ sim.Poster }}" alt="{{ sim.Title }} poster" loading="lazy" width="150" height="225">
+              <span class="fd-similar__title" title="{{ sim.Title }}">{{ sim.Title }}</span>
+              {% if sim.Year and sim.Year != 'N/A' %}<span class="fd-similar__year">{{ sim.Year }}</span>{% endif %}
+            </a>
+            {% endfor %}
+          </div>
+          <button type="button" class="fd-rail__btn fd-rail__btn--next" aria-label="Scroll similar series right" hidden>&#8250;</button>
+        </div>
+        {% else %}
+        <p class="fd-card__empty">No similar series found.</p>
+        {% endif %}
+      </section>
+
+    </div>
+  </div>
+
+  {% if fd_trailer or fd_videos %}
   <div class="film-trailer-modal" id="filmTrailerModal" hidden>
     <div class="film-trailer-modal__backdrop" data-trailer-close></div>
     <div class="film-trailer-modal__dialog" role="dialog" aria-modal="true" aria-label="{{ show.Title }} trailer">
-      <button type="button" class="film-trailer-modal__close" data-trailer-close aria-label="Close trailer">×</button>
+      <button type="button" class="film-trailer-modal__close" data-trailer-close aria-label="Close trailer">&times;</button>
       <div class="film-trailer-modal__frame" id="filmTrailerFrame"></div>
     </div>
   </div>
   {% endif %}
+  <script src="{{ url_for('static', filename='film.js') }}" defer></script>
+  <script>
+    document.querySelectorAll('.episode-rating-form').forEach(function (form) {
+      var widget = form.querySelector('.star-rating');
+      if (!widget) return;
+      widget.addEventListener('rating-change', function () {
+        try { sessionStorage.setItem('fd:tab', 'episodes'); } catch (err) { /* private mode */ }
+        form.submit();
+      });
+    });
+  </script>
+</div>
 
 {% elif view == "person" %}
 <article class="person-page">
@@ -2194,7 +2824,7 @@
 <div class="page-head">
   <div>
     <h1>Watchlist</h1>
-    <p class="lede">Films waiting for their turn on your screen.</p>
+    <p class="lede">Films and series waiting for their turn on your screen.</p>
   </div>
 </div>
 
@@ -2202,10 +2832,11 @@
 <div class="poster-grid">
   {% for movie in movies %}
   <div class="poster-card">
-    <a class="poster-tile" href="{{ url_for('film_by_title', title=movie.title) }}">
+    {% set wl_href = url_for('series_page', tmdb_id=movie.tmdb_id) if movie.media_type == 'tv' and movie.tmdb_id else url_for('film_by_title', title=movie.title) %}
+    <a class="poster-tile" href="{{ wl_href }}">
       <img src="{{ movie.poster_url or 'https://via.placeholder.com/300x450?text=No+Poster' }}" alt="{{ movie.title }}">
     </a>
-    <h5><a href="{{ url_for('film_by_title', title=movie.title) }}">{{ movie.title }}</a></h5>
+    <h5><a href="{{ wl_href }}">{{ movie.title }}</a></h5>
     <form method="POST" action="{{ url_for('remove_from_watchlist', movie_id=movie.id) }}">
       <button class="btn btn-sm btn-outline-danger" type="submit">Remove</button>
     </form>
@@ -2473,14 +3104,8 @@
     <div class="site-footer__inner">
       <div class="site-footer__brand">
         <a class="site-footer__logo-link" href="{{ url_for('home') }}">
-          <img
-            class="site-footer__logo"
-            src="{{ url_for('static', filename='icons/4movies-logo.png') }}"
-            alt=""
-            width="56"
-            height="56"
-          >
-          <span class="site-footer__title">4 Movies</span>
+          {{ brand_mark('site-footer__logo') }}
+          {{ brand_word('site-footer__title') }}
         </a>
         <p class="site-footer__tagline">4 Generations. 1 Love. Cinema Forever.</p>
       </div>
@@ -2515,11 +3140,8 @@
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="{{ url_for('static', filename='stars.js') }}"></script>
+  <script src="{{ url_for('static', filename='nav.js') }}" defer></script>
   <script>
-    document.getElementById("navToggle")?.addEventListener("click", function () {
-      document.getElementById("siteNav")?.classList.toggle("is-open");
-    });
-
     (function () {
       const bar = document.querySelector('[data-quote-bar]');
       if (!bar) return;
@@ -2538,31 +3160,6 @@
       };
       dots.forEach((dot, i) => dot.addEventListener('click', () => show(i)));
       setInterval(() => show(index + 1), 7000);
-    })();
-
-    (function () {
-      const root = document.documentElement;
-      const key = 'theme';
-      const saved = localStorage.getItem(key);
-      const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
-      const initial = saved || (prefersLight ? 'light' : 'dark');
-      root.dataset.theme = initial;
-
-      const btn = document.getElementById('themeToggle');
-      if (!btn) return;
-
-      function updateLabel() {
-        btn.dataset.theme = root.dataset.theme;
-        btn.textContent = root.dataset.theme === 'light' ? 'Light' : 'Dark';
-      }
-
-      btn.addEventListener('click', function () {
-        root.dataset.theme = root.dataset.theme === 'light' ? 'dark' : 'light';
-        localStorage.setItem(key, root.dataset.theme);
-        updateLabel();
-      });
-
-      updateLabel();
     })();
   </script>
 {% if view == "schedule" %}
@@ -2604,65 +3201,8 @@
 {% if view == "community" %}
 <script src="{{ url_for('static', filename='community.js') }}"></script>
 {% endif %}
-{% if view == "series_detail" %}
-<script>
-(function () {
-  document.querySelectorAll('.episode-rating-form').forEach((form) => {
-    const widget = form.querySelector('.star-rating');
-    if (!widget) return;
-    widget.addEventListener('rating-change', () => form.submit());
-  });
-
-  const playBtn = document.querySelector('.film-cover__play');
-  const modal = document.getElementById('filmTrailerModal');
-  const frameHost = document.getElementById('filmTrailerFrame');
-  if (!playBtn || !modal || !frameHost) return;
-
-  function youtubeEmbedUrl(url) {
-    if (!url) return null;
-    try {
-      const parsed = new URL(url);
-      if (parsed.hostname.includes('youtu.be')) {
-        return 'https://www.youtube.com/embed/' + parsed.pathname.replace(/^\//, '') + '?autoplay=1&rel=0';
-      }
-      const id = parsed.searchParams.get('v');
-      if (id) return 'https://www.youtube.com/embed/' + id + '?autoplay=1&rel=0';
-    } catch (err) {
-      return null;
-    }
-    return null;
-  }
-
-  function closeModal() {
-    modal.hidden = true;
-    frameHost.innerHTML = '';
-    document.body.style.overflow = '';
-  }
-
-  function openModal(url) {
-    const embed = youtubeEmbedUrl(url);
-    if (embed) {
-      frameHost.innerHTML = '<iframe src="' + embed + '" title="Trailer" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>';
-      modal.hidden = false;
-      document.body.style.overflow = 'hidden';
-      return;
-    }
-    window.open(url, '_blank', 'noopener,noreferrer');
-  }
-
-  playBtn.addEventListener('click', function () {
-    openModal(playBtn.dataset.trailerUrl);
-  });
-
-  modal.querySelectorAll('[data-trailer-close]').forEach(function (el) {
-    el.addEventListener('click', closeModal);
-  });
-
-  document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape' && !modal.hidden) closeModal();
-  });
-})();
-</script>
+{% if view in ['film', 'series_detail'] %}
+<script src="{{ url_for('static', filename='engage.js') }}" defer></script>
 {% endif %}
 {% if view == "home" %}
 {# Home trending slider is CSS-only; no JS required. #}
